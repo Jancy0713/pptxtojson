@@ -790,11 +790,49 @@ async function processPicNode(node, warpObj, source) {
 
   const { borderColor, borderWidth, borderType, strokeDasharray } = getBorder(node, undefined, warpObj)
 
-  return {
+  // 检查图像透明度
+  let opacity = 1
+
+  // 检查 p:blipFill 下的透明度
+  const blipFillNode = node['p:blipFill']
+  if (blipFillNode && blipFillNode['a:blip']) {
+    // 检查 a:alphaModFix
+    const alphaModFixNode = getTextByPathList(blipFillNode, ['a:blip', 'a:alphaModFix', 'attrs'])
+    if (alphaModFixNode && alphaModFixNode['amt']) {
+      opacity = parseInt(alphaModFixNode['amt']) / 100000
+    }
+
+    // 检查其他透明度路径
+    if (opacity === 1) {
+      const alphaNode = getTextByPathList(blipFillNode, ['a:blip', 'a:alpha', 'attrs'])
+      if (alphaNode && alphaNode['val']) {
+        opacity = parseInt(alphaNode['val']) / 100000
+      }
+    }
+  }
+
+  // 检查 p:spPr 下的透明度（新增的修复路径）
+  if (opacity === 1 && node['p:spPr']) {
+    // 检查 p:spPr -> a:solidFill -> a:srgbClr -> a:alpha
+    const spPrAlpha = parseInt(getTextByPathList(node, ['p:spPr', 'a:solidFill', 'a:srgbClr', 'a:alpha', 'attrs', 'val'])) / 100000
+    if (!isNaN(spPrAlpha)) {
+      opacity = spPrAlpha
+    }
+
+    // 检查 p:spPr -> a:solidFill -> a:schemeClr -> a:alpha
+    if (opacity === 1) {
+      const spPrSchemeAlpha = parseInt(getTextByPathList(node, ['p:spPr', 'a:solidFill', 'a:schemeClr', 'a:alpha', 'attrs', 'val'])) / 100000
+      if (!isNaN(spPrSchemeAlpha)) {
+        opacity = spPrSchemeAlpha
+      }
+    }
+  }
+
+  const result = {
     type: 'image',
     top,
     left,
-    width, 
+    width,
     height,
     rotate,
     src,
@@ -808,6 +846,13 @@ async function processPicNode(node, warpObj, source) {
     borderType,
     borderStrokeDasharray: strokeDasharray,
   }
+
+  // 如果透明度不是1，添加到结果中
+  if (opacity !== 1) {
+    result.opacity = opacity
+  }
+
+  return result
 }
 
 async function processGraphicFrameNode(node, warpObj, source) {

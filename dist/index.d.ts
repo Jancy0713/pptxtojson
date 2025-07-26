@@ -105,6 +105,7 @@ export interface Image {
   borderWidth: number
   borderType: 'solid' | 'dashed' | 'dotted'
   borderStrokeDasharray: string
+  opacity?: number
 }
 
 export interface TableCell {
