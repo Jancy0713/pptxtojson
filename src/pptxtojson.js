@@ -16,20 +16,29 @@ import { getShapePath } from './shapePath'
 
 export async function parse(file) {
   const slides = []
-  
+
   const zip = await JSZip.loadAsync(file)
 
   const filesInfo = await getContentTypes(zip)
   const { width, height, defaultTextStyle } = await getSlideInfo(zip)
   const { themeContent, themeColors } = await getTheme(zip)
 
+  // 先处理版式，获取占位符信息
+  const layouts = []
+  for (const filename of filesInfo.slideLayouts) {
+    const singleLayout = await processSingleLayout(zip, filename, themeContent, defaultTextStyle)
+    layouts.push(singleLayout)
+  }
+
+  // 再处理幻灯片，传入版式信息以获取占位符
   for (const filename of filesInfo.slides) {
-    const singleSlide = await processSingleSlide(zip, filename, themeContent, defaultTextStyle)
+    const singleSlide = await processSingleSlide(zip, filename, themeContent, defaultTextStyle, layouts)
     slides.push(singleSlide)
   }
 
   return {
     slides,
+    layouts,
     themeColors,
     size: {
       width,
@@ -113,7 +122,7 @@ async function getTheme(zip) {
   return { themeContent, themeColors }
 }
 
-async function processSingleSlide(zip, sldFileName, themeContent, defaultTextStyle) {
+async function processSingleSlide(zip, sldFileName, themeContent, defaultTextStyle, layouts = []) {
   const resName = sldFileName.replace('slides/slide', 'slides/_rels/slide') + '.rels'
   const resContent = await readXmlFile(zip, resName)
   let relationshipArray = resContent['Relationships']['Relationship']
@@ -274,6 +283,11 @@ async function processSingleSlide(zip, sldFileName, themeContent, defaultTextSty
     }
   }
 
+  // 为空内容的幻灯片元素填充版式的默认内容
+  if (layouts.length > 0) {
+    fillEmptyContentFromLayout(elements, layoutFilename, layouts)
+  }
+
   return {
     fill,
     elements,
@@ -351,6 +365,317 @@ async function getLayoutElements(warpObj) {
   }
   return elements
 }
+
+async function processSingleLayout(zip, layoutFile, themeContent, defaultTextStyle) {
+  // 读取版式XML文件
+  const layoutXmlContent = await readXmlFile(zip, layoutFile)
+
+  const sldLayout = layoutXmlContent['p:sldLayout']
+  const cSld = getTextByPathList(sldLayout, ['p:cSld'])
+
+  // 加载版式资源和关系，参考processSingleSlide的处理方式
+  const slideLayoutResFilename = layoutFile.replace('slideLayouts/slideLayout', 'slideLayouts/_rels/slideLayout') + '.rels'
+  const slideLayoutResContent = await readXmlFile(zip, slideLayoutResFilename)
+  let relationshipArray = slideLayoutResContent['Relationships']['Relationship']
+  if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+
+  let masterFilename = ''
+  // let themeFilename = ''
+  let diagramFilename = ''
+  const slideResObj = {}
+  const layoutResObj = {}
+  const masterResObj = {}
+  const themeResObj = {}
+  const diagramResObj = {}
+
+  // 处理版式的关系文件，类似于processSingleSlide
+  for (const relationshipArrayItem of relationshipArray) {
+    switch (relationshipArrayItem['attrs']['Type']) {
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster':
+        masterFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        break
+      case 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing':
+        diagramFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        slideResObj[relationshipArrayItem['attrs']['Id']] = {
+          type: relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          target: relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+        break
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image':
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart':
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink':
+      default:
+        layoutResObj[relationshipArrayItem['attrs']['Id']] = {
+          type: relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          target: relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+    }
+  }
+
+  // 加载slideMaster内容
+  const slideMasterContent = await readXmlFile(zip, masterFilename)
+  const slideMasterTextStyles = getTextByPathList(slideMasterContent, ['p:sldMaster', 'p:txStyles'])
+  const slideMasterTables = await indexNodes(slideMasterContent)
+
+  // 处理slideMaster的关系文件
+  const slideMasterResFilename = masterFilename.replace('slideMasters/slideMaster', 'slideMasters/_rels/slideMaster') + '.rels'
+  const slideMasterResContent = await readXmlFile(zip, slideMasterResFilename)
+  relationshipArray = slideMasterResContent['Relationships']['Relationship']
+  if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+
+  for (const relationshipArrayItem of relationshipArray) {
+    switch (relationshipArrayItem['attrs']['Type']) {
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme':
+        // themeFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        break
+      default:
+        masterResObj[relationshipArrayItem['attrs']['Id']] = {
+          'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+    }
+  }
+
+  // 处理diagram相关内容
+  let digramFileContent = {}
+  if (diagramFilename) {
+    digramFileContent = await readXmlFile(zip, diagramFilename)
+    if (digramFileContent) {
+      const digramFileContentObjToStr = JSON.stringify(digramFileContent).replace(/dsp:/g, 'p:')
+      digramFileContent = JSON.parse(digramFileContentObjToStr)
+    }
+    const digramResFileName = diagramFilename.replace('diagrams/data', 'diagrams/_rels/data') + '.rels'
+    const digramResContent = await readXmlFile(zip, digramResFileName)
+    if (digramResContent) {
+      relationshipArray = digramResContent['Relationships']['Relationship']
+      if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+      for (const relationshipArrayItem of relationshipArray) {
+        diagramResObj[relationshipArrayItem['attrs']['Id']] = {
+          'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+      }
+    }
+  }
+
+  const tableStyles = await readXmlFile(zip, 'ppt/tableStyles.xml')
+
+  // 创建warpObj，与processSingleSlide保持完全一致
+  const slideLayoutTables = await indexNodes(layoutXmlContent)
+
+  const warpObj = {
+    zip,
+    slideLayoutContent: layoutXmlContent,
+    slideLayoutTables,
+    slideMasterContent,
+    slideMasterTables,
+    slideContent: layoutXmlContent,
+    tableStyles,
+    slideResObj,
+    slideMasterTextStyles,
+    layoutResObj,
+    masterResObj,
+    themeContent,
+    themeResObj,
+    digramFileContent,
+    diagramResObj,
+    defaultTextStyle,
+  }
+
+  // 处理版式背景
+  const fill = await getSlideBackgroundFill(warpObj)
+
+  // 处理版式中的所有元素，分别返回占位符和非占位符元素
+  const { placeholderElements, layoutElements } = await processAllLayoutElements(cSld, warpObj)
+
+  // 构建版式对象，格式与slide完全一致
+  // 对于版式：
+  // - elements: 占位符元素
+  // - layoutElements: 非占位符元素（图片、形状等）
+  const layout = {
+    fill,
+    elements: placeholderElements, // 版式的占位符元素
+    layoutElements, // 版式的非占位符元素（图片、形状等）
+    note: '', // 版式没有备注
+    layoutFile, // 添加版式文件名，用于幻灯片匹配
+  }
+
+  return layout
+}
+
+// 合并的版式元素处理函数，同时处理占位符和非占位符元素
+async function processAllLayoutElements(cSld, warpObj) {
+  const placeholderElements = []
+  const layoutElements = []
+
+  if (!cSld || !cSld['p:spTree']) {
+    return { placeholderElements, layoutElements }
+  }
+
+  const spTree = cSld['p:spTree']
+
+  for (const nodeKey in spTree) {
+    if (nodeKey === 'p:nvGrpSpPr' || nodeKey === 'p:grpSpPr' || nodeKey === 'attrs') {
+      continue
+    }
+
+    const nodes = spTree[nodeKey].constructor === Array ? spTree[nodeKey] : [spTree[nodeKey]]
+
+    for (const node of nodes) {
+      // 检查是否是占位符节点
+      const ph = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph'])
+
+      // 处理节点
+      const element = await processNodesInSlide(nodeKey, node, nodes, warpObj, 'layout')
+      if (element) {
+        // 根据是否是占位符，放入不同的数组
+        if (ph && ph['attrs']) {
+          placeholderElements.push(element) // 占位符元素
+        }
+        else {
+          layoutElements.push(element) // 非占位符元素
+        }
+      }
+    }
+  }
+
+  return { placeholderElements, layoutElements }
+}
+
+// 为空内容的幻灯片元素填充版式的默认内容
+function fillEmptyContentFromLayout(slideElements, layoutFilename, layouts) {
+  // 找到对应的版式
+  const targetLayout = layouts.find(layout => {
+    // 通过文件名匹配版式（需要处理路径差异）
+    const layoutName = layoutFilename.split('/').pop() // 获取文件名部分
+    return layout.layoutFile && layout.layoutFile.includes(layoutName)
+  })
+
+  if (!targetLayout) return
+
+  // 获取版式中的所有占位符元素（包括text和shape类型）
+  const layoutPlaceholderElements = targetLayout.elements.filter(el =>
+    el.type === 'text' || (el.type === 'shape' && el.name && el.name.toLowerCase().includes('placeholder'))
+  )
+
+
+
+  // 为空内容的幻灯片文本元素填充版式内容
+  slideElements.forEach(slideElement => {
+    if (slideElement.type === 'text') {
+      // 使用hasRealText标记判断是否为空内容，这比检查HTML更准确
+      const isEmpty = !slideElement.hasRealText
+
+      if (isEmpty) {
+        // 找到位置最接近的版式占位符元素
+        const matchedLayoutElement = findClosestLayoutElement(slideElement, layoutPlaceholderElements)
+        if (matchedLayoutElement && matchedLayoutElement.content) {
+          slideElement.content = matchedLayoutElement.content
+        }
+      }
+    }
+  })
+}
+
+// 找到最匹配的版式元素（多维度匹配）
+function findClosestLayoutElement(slideElement, layoutElements) {
+  if (layoutElements.length === 0) return null
+
+  let bestMatch = null
+  let bestScore = -1
+
+  layoutElements.forEach(layoutElement => {
+    let score = 0
+
+    // 1. 名称匹配（最重要的匹配条件）
+    if (slideElement.name && layoutElement.name) {
+      if (slideElement.name === layoutElement.name) {
+        score += 100 // 名称完全匹配，给最高分
+      }
+      else if (slideElement.name.toLowerCase().includes(layoutElement.name.toLowerCase()) ||
+                 layoutElement.name.toLowerCase().includes(slideElement.name.toLowerCase())) {
+        score += 50 // 名称部分匹配
+      }
+    }
+
+    // 2. 位置匹配（精确位置匹配优先）
+    const dx = Math.abs(slideElement.left - layoutElement.left)
+    const dy = Math.abs(slideElement.top - layoutElement.top)
+    const positionDistance = Math.sqrt(dx * dx + dy * dy)
+
+    if (positionDistance < 1) {
+      score += 80 // 位置几乎完全匹配
+    }
+    else if (positionDistance < 50) {
+      score += 60 // 位置比较接近
+    }
+    else if (positionDistance < 100) {
+      score += 30 // 位置一般接近
+    }
+    else if (positionDistance < 200) {
+      score += 10 // 位置较远但可接受
+    }
+
+    // 3. 尺寸匹配
+    const widthDiff = Math.abs(slideElement.width - layoutElement.width)
+    const heightDiff = Math.abs(slideElement.height - layoutElement.height)
+
+    if (widthDiff < 10 && heightDiff < 10) {
+      score += 20 // 尺寸几乎匹配
+    }
+    else if (widthDiff < 50 && heightDiff < 50) {
+      score += 10 // 尺寸比较接近
+    }
+
+    // 4. 内容类型匹配（基于name判断）
+    if (slideElement.name && layoutElement.name) {
+      const slideType = getElementTypeFromName(slideElement.name)
+      const layoutType = getElementTypeFromName(layoutElement.name)
+      if (slideType === layoutType && slideType !== 'unknown') {
+        score += 30 // 类型匹配
+      }
+    }
+
+    // 5. 如果版式元素很少，给予额外分数（避免无匹配）
+    if (layoutElements.length <= 2) {
+      score += 15 // 版式元素稀少时的补偿分数
+    }
+
+    // 6. 如果是唯一的版式元素，再给额外分数
+    if (layoutElements.length === 1) {
+      score += 20 // 唯一版式元素的额外分数
+    }
+
+
+
+    if (score > bestScore) {
+      bestScore = score
+      bestMatch = layoutElement
+    }
+  })
+
+
+
+  // 如果有任何匹配就返回
+  return bestScore > 0 ? bestMatch : null
+}
+
+// 根据元素名称判断类型
+function getElementTypeFromName(name) {
+  if (!name) return 'unknown'
+
+  const lowerName = name.toLowerCase()
+  if (lowerName.includes('title')) return 'title'
+  if (lowerName.includes('content') || lowerName.includes('placeholder')) return 'content'
+  if (lowerName.includes('subtitle')) return 'subtitle'
+  if (lowerName.includes('footer')) return 'footer'
+  if (lowerName.includes('header')) return 'header'
+
+  return 'unknown'
+}
+
+
+
 
 function indexNodes(content) {
   const keys = Object.keys(content)
@@ -448,7 +773,8 @@ async function processMathNode(node, warpObj, source) {
   let text = ''
   if (getTextByPathList(choice, ['p:sp', 'p:txBody', 'a:p', 'a:r'])) {
     const sp = getTextByPathList(choice, ['p:sp'])
-    text = genTextBody(sp['p:txBody'], sp, undefined, undefined, warpObj)
+    const textResult = genTextBody(sp['p:txBody'], sp, undefined, undefined, warpObj)
+    text = textResult.content
   }
 
   return {
@@ -594,7 +920,12 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   else txtRotate = rotate
 
   let content = ''
-  if (node['p:txBody']) content = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj)
+  let hasRealText = false
+  if (node['p:txBody']) {
+    const textResult = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj)
+    content = textResult.content
+    hasRealText = textResult.hasRealText
+  }
 
   const { borderColor, borderWidth, borderType, strokeDasharray } = getBorder(node, type, warpObj)
   const fill = await getShapeFill(node, pNode, undefined, warpObj, source) || ''
@@ -670,18 +1001,26 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
     type: 'text',
     isVertical,
     rotate: txtRotate,
+    hasRealText, // 添加真实文本标记
   }
 }
 
 async function processPicNode(node, warpObj, source) {
   let resObj
   if (source === 'slideMasterBg') resObj = warpObj['masterResObj']
-  else if (source === 'slideLayoutBg') resObj = warpObj['layoutResObj']
+  else if (source === 'slideLayoutBg' || source === 'layout') resObj = warpObj['layoutResObj']
   else resObj = warpObj['slideResObj']
 
   const order = node['attrs']['order']
   
   const rid = node['p:blipFill']['a:blip']['attrs']['r:embed']
+
+  // 添加安全检查
+  if (!resObj || !resObj[rid]) {
+    console.warn(`图片资源未找到: rid=${rid}, source=${source}`)
+    return null
+  }
+
   const imgName = resObj[rid]['target']
   const imgFileExt = extractFileExtension(imgName).toLowerCase()
   const zip = warpObj['zip']
@@ -1009,9 +1348,9 @@ async function genTable(node, warpObj) {
             a_sorce = 'a:nwCell'
           }
         }
-        const text = genTextBody(tcNode['a:txBody'], tcNode, undefined, undefined, warpObj)
+        const textResult = genTextBody(tcNode['a:txBody'], tcNode, undefined, undefined, warpObj)
         const cell = await getTableCellParams(tcNode, thisTblStyle, a_sorce, warpObj)
-        const td = { text }
+        const td = { text: textResult.content }
         if (cell.rowSpan) td.rowSpan = cell.rowSpan
         if (cell.colSpan) td.colSpan = cell.colSpan
         if (cell.vMerge) td.vMerge = cell.vMerge
@@ -1041,9 +1380,9 @@ async function genTable(node, warpObj) {
         a_sorce = 'a:lastCol'
       }
 
-      const text = genTextBody(tcNodes['a:txBody'], tcNodes, undefined, undefined, warpObj)
+      const textResult = genTextBody(tcNodes['a:txBody'], tcNodes, undefined, undefined, warpObj)
       const cell = await getTableCellParams(tcNodes, thisTblStyle, a_sorce, warpObj)
-      const td = { text }
+      const td = { text: textResult.content }
       if (cell.rowSpan) td.rowSpan = cell.rowSpan
       if (cell.colSpan) td.colSpan = cell.colSpan
       if (cell.vMerge) td.vMerge = cell.vMerge
