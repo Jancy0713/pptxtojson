@@ -485,6 +485,9 @@ async function processSingleLayout(zip, layoutFile, themeContent, defaultTextSty
   // 处理版式背景
   const fill = await getSlideBackgroundFill(warpObj)
 
+  // 将layoutFile信息添加到warpObj中，用于调试
+  warpObj.layoutFile = layoutFile
+
   // 处理版式中的所有元素，分别返回占位符和非占位符元素
   const { placeholderElements, layoutElements } = await processAllLayoutElements(cSld, warpObj)
 
@@ -900,7 +903,7 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   const slideLayoutXfrmNode = getTextByPathList(slideLayoutSpNode, xfrmList)
   const slideMasterXfrmNode = getTextByPathList(slideMasterSpNode, xfrmList)
 
-  const shapType = getTextByPathList(node, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
+  let shapType = getTextByPathList(node, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
   const custShapType = getTextByPathList(node, ['p:spPr', 'a:custGeom'])
 
   const { top, left } = getPosition(slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode)
@@ -937,6 +940,35 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   const vAlign = getVerticalAlign(node, slideLayoutSpNode, slideMasterSpNode, type)
   const isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'
 
+  // 获取idx信息
+  const idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx'])
+
+  // 如果slide元素有idx，则从layout同步shapType和文本内容
+  if (idx && source !== 'layout') {
+    if (warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
+      const layoutElement = warpObj['slideLayoutTables']['idxTable'][idx]
+
+      if (layoutElement) {
+        // 1. 同步shapType（如果slide没有shapType）
+        if (!shapType) {
+          const layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
+          if (layoutShapType) {
+            shapType = layoutShapType
+          }
+        }
+
+        // 2. 同步文本内容（如果slide内容为空）
+        if (!hasRealText && layoutElement['p:txBody']) {
+          const layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj)
+          if (layoutTextResult.hasRealText) {
+            content = layoutTextResult.content
+            hasRealText = layoutTextResult.hasRealText
+          }
+        }
+      }
+    }
+  }
+
   const data = {
     left,
     top,
@@ -954,6 +986,7 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
     vAlign,
     name,
     order,
+    idx, // 添加idx信息
   }
 
   if (shadow) data.shadow = shadow

@@ -21896,7 +21896,14 @@ function getBorder(node, elType, warpObj) {
       }
     }
   }
-  if (!borderColor) borderColor = '#000000';else borderColor = "#".concat(borderColor);
+
+  // 如果没有找到任何颜色定义，说明这个边框不应该显示，将宽度设为0
+  if (!borderColor) {
+    borderWidth = 0;
+    borderColor = '#000000';
+  } else {
+    borderColor = "#".concat(borderColor);
+  }
   var type = getTextByPathList(lineNode, ['a:prstDash', 'attrs', 'val']);
   var borderType = 'solid';
   var strokeDasharray = '0';
@@ -29968,6 +29975,10 @@ function _processSingleLayout() {
           return getSlideBackgroundFill(warpObj);
         case 30:
           fill = _context7.sent;
+          // 将layoutFile信息添加到warpObj中，用于调试
+          warpObj.layoutFile = layoutFile;
+
+          // 处理版式中的所有元素，分别返回占位符和非占位符元素
           _context7.next = 31;
           return processAllLayoutElements(cSld, warpObj);
         case 31:
@@ -30553,7 +30564,7 @@ function genShape(_x33, _x34, _x35, _x36, _x37, _x38, _x39, _x40, _x41) {
 }
 function _genShape() {
   _genShape = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee12(node, pNode, slideLayoutSpNode, slideMasterSpNode, name, type, order, warpObj, source) {
-    var xfrmList, slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode, shapType, custShapType, _getPosition2, top, left, _getSize2, width, height, isFlipV, isFlipH, rotate, txtXframeNode, txtRotate, txtXframeRot, content, hasRealText, textResult, _getBorder, borderColor, borderWidth, borderType, strokeDasharray, fill, shadow, outerShdwNode, vAlign, isVertical, data, isHasValidText, ext, w, h, d, shapePath, _t28;
+    var xfrmList, slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode, shapType, custShapType, _getPosition2, top, left, _getSize2, width, height, isFlipV, isFlipH, rotate, txtXframeNode, txtRotate, txtXframeRot, content, hasRealText, textResult, _getBorder, borderColor, borderWidth, borderType, strokeDasharray, fill, shadow, outerShdwNode, vAlign, isVertical, idx, layoutElement, layoutShapType, layoutTextResult, data, isHasValidText, ext, w, h, d, shapePath, _t28;
     return regenerator.wrap(function (_context12) {
       while (1) switch (_context12.prev = _context12.next) {
         case 0:
@@ -30595,7 +30606,31 @@ function _genShape() {
           outerShdwNode = getTextByPathList(node, ['p:spPr', 'a:effectLst', 'a:outerShdw']);
           if (outerShdwNode) shadow = getShadow(outerShdwNode, warpObj);
           vAlign = getVerticalAlign(node, slideLayoutSpNode, slideMasterSpNode);
-          isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert';
+          isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'; // 获取idx信息
+          idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx']); // 如果slide元素有idx，则从layout同步shapType和文本内容
+          if (idx && source !== 'layout') {
+            if (warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
+              layoutElement = warpObj['slideLayoutTables']['idxTable'][idx];
+              if (layoutElement) {
+                // 1. 同步shapType（如果slide没有shapType）
+                if (!shapType) {
+                  layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst']);
+                  if (layoutShapType) {
+                    shapType = layoutShapType;
+                  }
+                }
+
+                // 2. 同步文本内容（如果slide内容为空）
+                if (!hasRealText && layoutElement['p:txBody']) {
+                  layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj);
+                  if (layoutTextResult.hasRealText) {
+                    content = layoutTextResult.content;
+                    hasRealText = layoutTextResult.hasRealText;
+                  }
+                }
+              }
+            }
+          }
           data = {
             left: left,
             top: top,
@@ -30612,7 +30647,8 @@ function _genShape() {
             rotate: rotate,
             vAlign: vAlign,
             name: name,
-            order: order
+            order: order,
+            idx: idx // 添加idx信息
           };
           if (shadow) data.shadow = shadow;
           isHasValidText = data.content && hasValidText(data.content);

@@ -46,8 +46,14 @@ export function getBorder(node, elType, warpObj) {
     }
   }
 
-  if (!borderColor) borderColor = '#000000'
-  else borderColor = `#${borderColor}`
+  // 如果没有找到任何颜色定义，说明这个边框不应该显示，将宽度设为0
+  if (!borderColor) {
+    borderWidth = 0
+    borderColor = '#000000'
+  }
+  else {
+    borderColor = `#${borderColor}`
+  }
 
   const type = getTextByPathList(lineNode, ['a:prstDash', 'attrs', 'val'])
   let borderType = 'solid'
