@@ -5,7 +5,7 @@ import { getSlideBackgroundFill, getShapeFill, getSolidFill, getPicFill } from '
 import { getChartInfo } from './chart'
 import { getVerticalAlign } from './align'
 import { getPosition, getSize } from './position'
-import { genTextBody } from './text'
+import { genTextBody, extractPlainText } from './text'
 import { getCustomShapePath } from './shape'
 import { extractFileExtension, base64ArrayBuffer, getTextByPathList, angleToDegrees, getMimeType, isVideoLink, escapeHtml, hasValidText } from './utils'
 import { getShadow } from './shadow'
@@ -25,13 +25,16 @@ export async function parse(file) {
 
   // 先处理版式，获取占位符信息
   const layouts = []
-  for (const filename of filesInfo.slideLayouts) {
+  for (let i = 0; i < filesInfo.slideLayouts.length; i++) {
+    const filename = filesInfo.slideLayouts[i]
     const singleLayout = await processSingleLayout(zip, filename, themeContent, defaultTextStyle)
     layouts.push(singleLayout)
   }
 
   // 再处理幻灯片，传入版式信息以获取占位符
-  for (const filename of filesInfo.slides) {
+  for (let i = 0; i < filesInfo.slides.length; i++) {
+    const filename = filesInfo.slides[i]
+
     const singleSlide = await processSingleSlide(zip, filename, themeContent, defaultTextStyle, layouts)
     slides.push(singleSlide)
   }
@@ -283,9 +286,18 @@ async function processSingleSlide(zip, sldFileName, themeContent, defaultTextSty
     }
   }
 
-  // 为空内容的幻灯片元素填充版式的默认内容
+
+
+  // 获取幻灯片使用的版式名称
+  let layoutName = ''
   if (layouts.length > 0) {
-    fillEmptyContentFromLayout(elements, layoutFilename, layouts)
+    const targetLayout = layouts.find(layout => {
+      const layoutFileName = layoutFilename.split('/').pop()
+      return layout.layoutFile && layout.layoutFile.includes(layoutFileName)
+    })
+    if (targetLayout) {
+      layoutName = targetLayout.layoutName || ''
+    }
   }
 
   return {
@@ -293,6 +305,7 @@ async function processSingleSlide(zip, sldFileName, themeContent, defaultTextSty
     elements,
     layoutElements,
     note,
+    layoutName, // 添加版式名称
   }
 }
 
@@ -488,6 +501,12 @@ async function processSingleLayout(zip, layoutFile, themeContent, defaultTextSty
   // 将layoutFile信息添加到warpObj中，用于调试
   warpObj.layoutFile = layoutFile
 
+  // 获取版式名称
+  const layoutName = getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'attrs', 'name']) ||
+                    getTextByPathList(layoutXmlContent, ['p:sldLayout', 'attrs', 'name']) ||
+                    getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'p:nvGrpSpPr', 'p:cNvPr', 'attrs', 'name']) ||
+                    ''
+
   // 处理版式中的所有元素，分别返回占位符和非占位符元素
   const { placeholderElements, layoutElements } = await processAllLayoutElements(cSld, warpObj)
 
@@ -501,6 +520,7 @@ async function processSingleLayout(zip, layoutFile, themeContent, defaultTextSty
     layoutElements, // 版式的非占位符元素（图片、形状等）
     note: '', // 版式没有备注
     layoutFile, // 添加版式文件名，用于幻灯片匹配
+    layoutName, // 添加版式名称
   }
 
   return layout
@@ -544,140 +564,6 @@ async function processAllLayoutElements(cSld, warpObj) {
 
   return { placeholderElements, layoutElements }
 }
-
-// 为空内容的幻灯片元素填充版式的默认内容
-function fillEmptyContentFromLayout(slideElements, layoutFilename, layouts) {
-  // 找到对应的版式
-  const targetLayout = layouts.find(layout => {
-    // 通过文件名匹配版式（需要处理路径差异）
-    const layoutName = layoutFilename.split('/').pop() // 获取文件名部分
-    return layout.layoutFile && layout.layoutFile.includes(layoutName)
-  })
-
-  if (!targetLayout) return
-
-  // 获取版式中的所有占位符元素（包括text和shape类型）
-  const layoutPlaceholderElements = targetLayout.elements.filter(el =>
-    el.type === 'text' || (el.type === 'shape' && el.name && el.name.toLowerCase().includes('placeholder'))
-  )
-
-
-
-  // 为空内容的幻灯片文本元素填充版式内容
-  slideElements.forEach(slideElement => {
-    if (slideElement.type === 'text') {
-      // 使用hasRealText标记判断是否为空内容，这比检查HTML更准确
-      const isEmpty = !slideElement.hasRealText
-
-      if (isEmpty) {
-        // 找到位置最接近的版式占位符元素
-        const matchedLayoutElement = findClosestLayoutElement(slideElement, layoutPlaceholderElements)
-        if (matchedLayoutElement && matchedLayoutElement.content) {
-          slideElement.content = matchedLayoutElement.content
-        }
-      }
-    }
-  })
-}
-
-// 找到最匹配的版式元素（多维度匹配）
-function findClosestLayoutElement(slideElement, layoutElements) {
-  if (layoutElements.length === 0) return null
-
-  let bestMatch = null
-  let bestScore = -1
-
-  layoutElements.forEach(layoutElement => {
-    let score = 0
-
-    // 1. 名称匹配（最重要的匹配条件）
-    if (slideElement.name && layoutElement.name) {
-      if (slideElement.name === layoutElement.name) {
-        score += 100 // 名称完全匹配，给最高分
-      }
-      else if (slideElement.name.toLowerCase().includes(layoutElement.name.toLowerCase()) ||
-                 layoutElement.name.toLowerCase().includes(slideElement.name.toLowerCase())) {
-        score += 50 // 名称部分匹配
-      }
-    }
-
-    // 2. 位置匹配（精确位置匹配优先）
-    const dx = Math.abs(slideElement.left - layoutElement.left)
-    const dy = Math.abs(slideElement.top - layoutElement.top)
-    const positionDistance = Math.sqrt(dx * dx + dy * dy)
-
-    if (positionDistance < 1) {
-      score += 80 // 位置几乎完全匹配
-    }
-    else if (positionDistance < 50) {
-      score += 60 // 位置比较接近
-    }
-    else if (positionDistance < 100) {
-      score += 30 // 位置一般接近
-    }
-    else if (positionDistance < 200) {
-      score += 10 // 位置较远但可接受
-    }
-
-    // 3. 尺寸匹配
-    const widthDiff = Math.abs(slideElement.width - layoutElement.width)
-    const heightDiff = Math.abs(slideElement.height - layoutElement.height)
-
-    if (widthDiff < 10 && heightDiff < 10) {
-      score += 20 // 尺寸几乎匹配
-    }
-    else if (widthDiff < 50 && heightDiff < 50) {
-      score += 10 // 尺寸比较接近
-    }
-
-    // 4. 内容类型匹配（基于name判断）
-    if (slideElement.name && layoutElement.name) {
-      const slideType = getElementTypeFromName(slideElement.name)
-      const layoutType = getElementTypeFromName(layoutElement.name)
-      if (slideType === layoutType && slideType !== 'unknown') {
-        score += 30 // 类型匹配
-      }
-    }
-
-    // 5. 如果版式元素很少，给予额外分数（避免无匹配）
-    if (layoutElements.length <= 2) {
-      score += 15 // 版式元素稀少时的补偿分数
-    }
-
-    // 6. 如果是唯一的版式元素，再给额外分数
-    if (layoutElements.length === 1) {
-      score += 20 // 唯一版式元素的额外分数
-    }
-
-
-
-    if (score > bestScore) {
-      bestScore = score
-      bestMatch = layoutElement
-    }
-  })
-
-
-
-  // 如果有任何匹配就返回
-  return bestScore > 0 ? bestMatch : null
-}
-
-// 根据元素名称判断类型
-function getElementTypeFromName(name) {
-  if (!name) return 'unknown'
-
-  const lowerName = name.toLowerCase()
-  if (lowerName.includes('title')) return 'title'
-  if (lowerName.includes('content') || lowerName.includes('placeholder')) return 'content'
-  if (lowerName.includes('subtitle')) return 'subtitle'
-  if (lowerName.includes('footer')) return 'footer'
-  if (lowerName.includes('header')) return 'header'
-
-  return 'unknown'
-}
-
-
 
 
 function indexNodes(content) {
@@ -924,10 +810,12 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
 
   let content = ''
   let hasRealText = false
+  let plainText = '' // 添加纯文本内容
   if (node['p:txBody']) {
     const textResult = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj)
     content = textResult.content
     hasRealText = textResult.hasRealText
+    plainText = extractPlainText(node['p:txBody']) // 提取纯文本
   }
 
   const { borderColor, borderWidth, borderType, strokeDasharray } = getBorder(node, type, warpObj)
@@ -940,30 +828,64 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   const vAlign = getVerticalAlign(node, slideLayoutSpNode, slideMasterSpNode, type)
   const isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'
 
-  // 获取idx信息
+  // 获取idx信息和占位符类型
   const idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx'])
+  const phNode = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph'])
+  let phType
 
-  // 如果slide元素有idx，则从layout同步shapType和文本内容
-  if (idx && source !== 'layout') {
-    if (warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
-      const layoutElement = warpObj['slideLayoutTables']['idxTable'][idx]
+  if (phNode) {
+    // 有占位符节点的情况
+    const originalPhType = getTextByPathList(phNode, ['attrs', 'type'])
+    if (!originalPhType || originalPhType === '') {
+      phType = 'any' // 有ph但phType为空时设置为any
+    }
+    else if (originalPhType === 'body') {
+      phType = 'text' // phType为body时设置为text
+    }
+    else {
+      phType = originalPhType // 其他都按原本的来
+    }
+  }
+  else {
+    // 没有占位符节点的情况
+    phType = undefined
+  }
 
-      if (layoutElement) {
-        // 1. 同步shapType（如果slide没有shapType）
-        if (!shapType) {
-          const layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
-          if (layoutShapType) {
-            shapType = layoutShapType
-          }
+  // 从layout同步shapType和文本内容
+  if (source !== 'layout') {
+    let layoutElement = null
+
+    // 获取对应的版式元素
+    if (phType === 'title' && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['typeTable']) {
+      // title类型：通过类型匹配
+      if (idx) {
+        layoutElement = warpObj['slideLayoutTables']['typeTable'][`title_${idx}`]
+      }
+      if (!layoutElement) {
+        layoutElement = warpObj['slideLayoutTables']['typeTable']['title']
+      }
+    }
+    else if (idx && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
+      // 其他类型：通过idx匹配
+      layoutElement = warpObj['slideLayoutTables']['idxTable'][idx]
+    }
+
+    if (layoutElement) {
+      // 1. 同步shapType（如果slide没有shapType）
+      if (!shapType) {
+        const layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
+        if (layoutShapType) {
+          shapType = layoutShapType
         }
+      }
 
-        // 2. 同步文本内容（如果slide内容为空）
-        if (!hasRealText && layoutElement['p:txBody']) {
-          const layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj)
-          if (layoutTextResult.hasRealText) {
-            content = layoutTextResult.content
-            hasRealText = layoutTextResult.hasRealText
-          }
+      // 2. 同步文本内容（如果slide内容为空）
+      if (!hasRealText && layoutElement['p:txBody']) {
+        const layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj)
+        if (layoutTextResult.hasRealText) {
+          content = layoutTextResult.content
+          hasRealText = layoutTextResult.hasRealText
+          plainText = extractPlainText(layoutElement['p:txBody']) // 同步纯文本
         }
       }
     }
@@ -987,6 +909,8 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
     name,
     order,
     idx, // 添加idx信息
+    phType, // 添加占位符类型
+    plainText, // 添加纯文本内容
   }
 
   if (shadow) data.shadow = shadow
@@ -1050,7 +974,6 @@ async function processPicNode(node, warpObj, source) {
 
   // 添加安全检查
   if (!resObj || !resObj[rid]) {
-    console.warn(`图片资源未找到: rid=${rid}, source=${source}`)
     return null
   }
 

@@ -1,6 +1,55 @@
 import { getHorizontalAlign } from './align'
 import { getTextByPathList } from './utils'
 
+// 提取纯文本内容的函数
+export function extractPlainText(textBodyNode) {
+  if (!textBodyNode) return ''
+
+  let plainText = ''
+  const pNode = textBodyNode['a:p']
+  const pNodes = pNode.constructor === Array ? pNode : [pNode]
+
+  for (const pNode of pNodes) {
+    let rNode = pNode['a:r']
+    let fldNode = pNode['a:fld']
+    let brNode = pNode['a:br']
+
+    if (rNode) {
+      rNode = (rNode.constructor === Array) ? rNode : [rNode]
+
+      if (fldNode) {
+        fldNode = (fldNode.constructor === Array) ? fldNode : [fldNode]
+        rNode = rNode.concat(fldNode)
+      }
+      if (brNode) {
+        brNode = (brNode.constructor === Array) ? brNode : [brNode]
+        brNode.forEach(item => item.type = 'br')
+        if (brNode.length > 1) brNode.shift()
+        rNode = rNode.concat(brNode)
+        rNode.sort((a, b) => {
+          if (!a.attrs || !b.attrs) return true
+          return a.attrs.order - b.attrs.order
+        })
+      }
+    }
+
+    const rNodes = rNode ? rNode : [pNode]
+    for (const rNodeItem of rNodes) {
+      if (rNodeItem.type === 'br') {
+        plainText += '\n'
+      }
+      else {
+        let text = rNodeItem['a:t']
+        if (typeof text !== 'string') text = getTextByPathList(rNodeItem, ['a:fld', 'a:t'])
+        if (typeof text === 'string') plainText += text
+      }
+    }
+    plainText += '\n' // 段落换行
+  }
+
+  return plainText.trim()
+}
+
 import {
   getFontType,
   getFontColor,

@@ -23283,18 +23283,13 @@
   function _createForOfIteratorHelper$2(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray$3(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n = 0, F = function F() {}; return { s: F, n: function n() { return _n >= r.length ? { done: !0 } : { done: !1, value: r[_n++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
   function _unsupportedIterableToArray$3(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray$3(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray$3(r, a) : void 0; } }
   function _arrayLikeToArray$3(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-  function genTextBody(textBodyNode, spNode, slideLayoutSpNode, type, warpObj) {
-    if (!textBodyNode) return {
-      content: '',
-      hasRealText: false
-    };
-    var text = '';
-    var hasRealText = false; // 标记是否有真实的文本内容
 
-    var pFontStyle = getTextByPathList(spNode, ['p:style', 'a:fontRef']);
+  // 提取纯文本内容的函数
+  function extractPlainText(textBodyNode) {
+    if (!textBodyNode) return '';
+    var plainText = '';
     var pNode = textBodyNode['a:p'];
     var pNodes = pNode.constructor === Array ? pNode : [pNode];
-    var isList = '';
     var _iterator = _createForOfIteratorHelper$2(pNodes),
       _step;
     try {
@@ -23322,8 +23317,75 @@
             });
           }
         }
-        var align = getHorizontalAlign(_pNode, spNode, type, warpObj);
-        var listType = getListType(_pNode);
+        var rNodes = rNode ? rNode : [_pNode];
+        var _iterator2 = _createForOfIteratorHelper$2(rNodes),
+          _step2;
+        try {
+          for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
+            var rNodeItem = _step2.value;
+            if (rNodeItem.type === 'br') {
+              plainText += '\n';
+            } else {
+              var text = rNodeItem['a:t'];
+              if (typeof text !== 'string') text = getTextByPathList(rNodeItem, ['a:fld', 'a:t']);
+              if (typeof text === 'string') plainText += text;
+            }
+          }
+        } catch (err) {
+          _iterator2.e(err);
+        } finally {
+          _iterator2.f();
+        }
+        plainText += '\n'; // 段落换行
+      }
+    } catch (err) {
+      _iterator.e(err);
+    } finally {
+      _iterator.f();
+    }
+    return plainText.trim();
+  }
+  function genTextBody(textBodyNode, spNode, slideLayoutSpNode, type, warpObj) {
+    if (!textBodyNode) return {
+      content: '',
+      hasRealText: false
+    };
+    var text = '';
+    var hasRealText = false; // 标记是否有真实的文本内容
+
+    var pFontStyle = getTextByPathList(spNode, ['p:style', 'a:fontRef']);
+    var pNode = textBodyNode['a:p'];
+    var pNodes = pNode.constructor === Array ? pNode : [pNode];
+    var isList = '';
+    var _iterator3 = _createForOfIteratorHelper$2(pNodes),
+      _step3;
+    try {
+      for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
+        var _pNode2 = _step3.value;
+        var rNode = _pNode2['a:r'];
+        var fldNode = _pNode2['a:fld'];
+        var brNode = _pNode2['a:br'];
+        if (rNode) {
+          rNode = rNode.constructor === Array ? rNode : [rNode];
+          if (fldNode) {
+            fldNode = fldNode.constructor === Array ? fldNode : [fldNode];
+            rNode = rNode.concat(fldNode);
+          }
+          if (brNode) {
+            brNode = brNode.constructor === Array ? brNode : [brNode];
+            brNode.forEach(function (item) {
+              return item.type = 'br';
+            });
+            if (brNode.length > 1) brNode.shift();
+            rNode = rNode.concat(brNode);
+            rNode.sort(function (a, b) {
+              if (!a.attrs || !b.attrs) return true;
+              return a.attrs.order - b.attrs.order;
+            });
+          }
+        }
+        var align = getHorizontalAlign(_pNode2, spNode, type, warpObj);
+        var listType = getListType(_pNode2);
         if (listType) {
           if (!isList) {
             text += "<".concat(listType, ">");
@@ -23341,27 +23403,27 @@
           }
           text += "<p style=\"text-align: ".concat(align, ";\">");
         }
-        var rNodes = rNode ? rNode : [_pNode];
-        var _iterator2 = _createForOfIteratorHelper$2(rNodes),
-          _step2;
+        var rNodes = rNode ? rNode : [_pNode2];
+        var _iterator4 = _createForOfIteratorHelper$2(rNodes),
+          _step4;
         try {
-          for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
-            var rNodeItem = _step2.value;
-            var spanResult = genSpanElement(rNodeItem, _pNode, textBodyNode, pFontStyle, slideLayoutSpNode, type, warpObj);
+          for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
+            var rNodeItem = _step4.value;
+            var spanResult = genSpanElement(rNodeItem, _pNode2, textBodyNode, pFontStyle, slideLayoutSpNode, type, warpObj);
             text += spanResult.content;
             if (spanResult.hasRealText) hasRealText = true;
           }
         } catch (err) {
-          _iterator2.e(err);
+          _iterator4.e(err);
         } finally {
-          _iterator2.f();
+          _iterator4.f();
         }
         if (listType) text += '</li>';else text += '</p>';
       }
     } catch (err) {
-      _iterator.e(err);
+      _iterator3.e(err);
     } finally {
-      _iterator.f();
+      _iterator3.f();
     }
     return {
       content: text,
@@ -28924,7 +28986,7 @@
   }
   function _parse() {
     _parse = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee(file) {
-      var slides, zip, filesInfo, _yield$getSlideInfo, width, height, defaultTextStyle, _yield$getTheme, themeContent, themeColors, layouts, _iterator4, _step4, filename, singleLayout, _iterator5, _step5, _filename, singleSlide, _t, _t2;
+      var slides, zip, filesInfo, _yield$getSlideInfo, width, height, defaultTextStyle, _yield$getTheme, themeContent, themeColors, layouts, i, filename, singleLayout, _i, _filename, singleSlide;
       return regenerator.wrap(function (_context) {
         while (1) switch (_context.prev = _context.next) {
           case 0:
@@ -28952,65 +29014,40 @@
             themeColors = _yield$getTheme.themeColors;
             // 先处理版式，获取占位符信息
             layouts = [];
-            _iterator4 = _createForOfIteratorHelper(filesInfo.slideLayouts);
-            _context.prev = 5;
-            _iterator4.s();
-          case 6:
-            if ((_step4 = _iterator4.n()).done) {
-              _context.next = 9;
+            i = 0;
+          case 5:
+            if (!(i < filesInfo.slideLayouts.length)) {
+              _context.next = 8;
               break;
             }
-            filename = _step4.value;
-            _context.next = 7;
+            filename = filesInfo.slideLayouts[i];
+            _context.next = 6;
             return processSingleLayout(zip, filename, themeContent, defaultTextStyle);
-          case 7:
+          case 6:
             singleLayout = _context.sent;
             layouts.push(singleLayout);
+          case 7:
+            i++;
+            _context.next = 5;
+            break;
           case 8:
-            _context.next = 6;
-            break;
+            _i = 0;
           case 9:
-            _context.next = 11;
-            break;
-          case 10:
-            _context.prev = 10;
-            _t = _context["catch"](5);
-            _iterator4.e(_t);
-          case 11:
-            _context.prev = 11;
-            _iterator4.f();
-            return _context.finish(11);
-          case 12:
-            // 再处理幻灯片，传入版式信息以获取占位符
-            _iterator5 = _createForOfIteratorHelper(filesInfo.slides);
-            _context.prev = 13;
-            _iterator5.s();
-          case 14:
-            if ((_step5 = _iterator5.n()).done) {
-              _context.next = 17;
+            if (!(_i < filesInfo.slides.length)) {
+              _context.next = 12;
               break;
             }
-            _filename = _step5.value;
-            _context.next = 15;
+            _filename = filesInfo.slides[_i];
+            _context.next = 10;
             return processSingleSlide(zip, _filename, themeContent, defaultTextStyle, layouts);
-          case 15:
+          case 10:
             singleSlide = _context.sent;
             slides.push(singleSlide);
-          case 16:
-            _context.next = 14;
+          case 11:
+            _i++;
+            _context.next = 9;
             break;
-          case 17:
-            _context.next = 19;
-            break;
-          case 18:
-            _context.prev = 18;
-            _t2 = _context["catch"](13);
-            _iterator5.e(_t2);
-          case 19:
-            _context.prev = 19;
-            _iterator5.f();
-            return _context.finish(19);
-          case 20:
+          case 12:
             return _context.abrupt("return", {
               slides: slides,
               layouts: layouts,
@@ -29020,11 +29057,11 @@
                 height: height
               }
             });
-          case 21:
+          case 13:
           case "end":
             return _context.stop();
         }
-      }, _callee, null, [[5, 10, 11, 12], [13, 18, 19, 20]]);
+      }, _callee);
     }));
     return _parse.apply(this, arguments);
   }
@@ -29033,7 +29070,7 @@
   }
   function _getContentTypes() {
     _getContentTypes = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee2(zip) {
-      var ContentTypesJson, subObj, slidesLocArray, slideLayoutsLocArray, _iterator6, _step6, item, sortSlideXml, _t3, _t4;
+      var ContentTypesJson, subObj, slidesLocArray, slideLayoutsLocArray, _iterator4, _step4, item, sortSlideXml, _t, _t2;
       return regenerator.wrap(function (_context2) {
         while (1) switch (_context2.prev = _context2.next) {
           case 0:
@@ -29044,17 +29081,17 @@
             subObj = ContentTypesJson['Types']['Override'];
             slidesLocArray = [];
             slideLayoutsLocArray = [];
-            _iterator6 = _createForOfIteratorHelper(subObj);
+            _iterator4 = _createForOfIteratorHelper(subObj);
             _context2.prev = 2;
-            _iterator6.s();
+            _iterator4.s();
           case 3:
-            if ((_step6 = _iterator6.n()).done) {
+            if ((_step4 = _iterator4.n()).done) {
               _context2.next = 7;
               break;
             }
-            item = _step6.value;
-            _t3 = item['attrs']['ContentType'];
-            _context2.next = _t3 === 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml' ? 4 : _t3 === 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml' ? 5 : 6;
+            item = _step4.value;
+            _t = item['attrs']['ContentType'];
+            _context2.next = _t === 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml' ? 4 : _t === 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml' ? 5 : 6;
             break;
           case 4:
             slidesLocArray.push(item['attrs']['PartName'].substr(1));
@@ -29070,11 +29107,11 @@
             break;
           case 8:
             _context2.prev = 8;
-            _t4 = _context2["catch"](2);
-            _iterator6.e(_t4);
+            _t2 = _context2["catch"](2);
+            _iterator4.e(_t2);
           case 9:
             _context2.prev = 9;
-            _iterator6.f();
+            _iterator4.f();
             return _context2.finish(9);
           case 10:
             sortSlideXml = function sortSlideXml(p1, p2) {
@@ -29129,7 +29166,7 @@
   }
   function _getTheme() {
     _getTheme = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee4(zip) {
-      var preResContent, relationshipArray, themeURI, _iterator7, _step7, relationshipItem, themeContent, themeColors, clrScheme, i, color, _t5;
+      var preResContent, relationshipArray, themeURI, _iterator5, _step5, relationshipItem, themeContent, themeColors, clrScheme, i, color, _t3;
       return regenerator.wrap(function (_context4) {
         while (1) switch (_context4.prev = _context4.next) {
           case 0:
@@ -29142,15 +29179,15 @@
               _context4.next = 9;
               break;
             }
-            _iterator7 = _createForOfIteratorHelper(relationshipArray);
+            _iterator5 = _createForOfIteratorHelper(relationshipArray);
             _context4.prev = 2;
-            _iterator7.s();
+            _iterator5.s();
           case 3:
-            if ((_step7 = _iterator7.n()).done) {
+            if ((_step5 = _iterator5.n()).done) {
               _context4.next = 5;
               break;
             }
-            relationshipItem = _step7.value;
+            relationshipItem = _step5.value;
             if (!(relationshipItem['attrs']['Type'] === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme')) {
               _context4.next = 4;
               break;
@@ -29165,11 +29202,11 @@
             break;
           case 6:
             _context4.prev = 6;
-            _t5 = _context4["catch"](2);
-            _iterator7.e(_t5);
+            _t3 = _context4["catch"](2);
+            _iterator5.e(_t3);
           case 7:
             _context4.prev = 7;
-            _iterator7.f();
+            _iterator5.f();
             return _context4.finish(7);
           case 8:
             _context4.next = 10;
@@ -29239,8 +29276,8 @@
         masterResObj,
         themeResObj,
         diagramResObj,
-        _iterator8,
-        _step8,
+        _iterator6,
+        _step6,
         _relationshipArrayItem2,
         slideNotesContent,
         note,
@@ -29248,30 +29285,30 @@
         slideLayoutTables,
         slideLayoutResFilename,
         slideLayoutResContent,
-        _iterator9,
-        _step9,
+        _iterator7,
+        _step7,
         _relationshipArrayItem3,
         slideMasterContent,
         slideMasterTextStyles,
         slideMasterTables,
         slideMasterResFilename,
         slideMasterResContent,
-        _iterator0,
-        _step0,
+        _iterator8,
+        _step8,
         _relationshipArrayItem4,
         themeName,
         themeResFileName,
         themeResContent,
-        _iterator1,
-        _step1,
+        _iterator9,
+        _step9,
         relationshipArrayItem,
         digramFileContent,
         diagName,
         diagramResFileName,
         digramFileContentObjToStr,
         digramResContent,
-        _iterator10,
-        _step10,
+        _iterator0,
+        _step0,
         _relationshipArrayItem,
         tableStyles,
         slideContent,
@@ -29281,20 +29318,22 @@
         fill,
         elements,
         nodeKey,
-        _iterator11,
-        _step11,
+        _iterator1,
+        _step1,
         node,
         ret,
+        layoutName,
+        targetLayout,
         _args5 = arguments,
+        _t4,
+        _t5,
         _t6,
         _t7,
         _t8,
         _t9,
         _t0,
         _t1,
-        _t10,
-        _t11,
-        _t12;
+        _t10;
       return regenerator.wrap(function (_context5) {
         while (1) switch (_context5.prev = _context5.next) {
           case 0:
@@ -29316,17 +29355,17 @@
             masterResObj = {};
             themeResObj = {};
             diagramResObj = {};
-            _iterator8 = _createForOfIteratorHelper(relationshipArray);
+            _iterator6 = _createForOfIteratorHelper(relationshipArray);
             _context5.prev = 2;
-            _iterator8.s();
+            _iterator6.s();
           case 3:
-            if ((_step8 = _iterator8.n()).done) {
+            if ((_step6 = _iterator6.n()).done) {
               _context5.next = 9;
               break;
             }
-            _relationshipArrayItem2 = _step8.value;
-            _t6 = _relationshipArrayItem2['attrs']['Type'];
-            _context5.next = _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout' ? 4 : _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide' ? 5 : _t6 === 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing' ? 6 : _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ? 7 : _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart' ? 7 : _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink' ? 7 : 7;
+            _relationshipArrayItem2 = _step6.value;
+            _t4 = _relationshipArrayItem2['attrs']['Type'];
+            _context5.next = _t4 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout' ? 4 : _t4 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide' ? 5 : _t4 === 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing' ? 6 : _t4 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ? 7 : _t4 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart' ? 7 : _t4 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink' ? 7 : 7;
             break;
           case 4:
             layoutFilename = _relationshipArrayItem2['attrs']['Target'].replace('../', 'ppt/');
@@ -29354,11 +29393,11 @@
             break;
           case 10:
             _context5.prev = 10;
-            _t7 = _context5["catch"](2);
-            _iterator8.e(_t7);
+            _t5 = _context5["catch"](2);
+            _iterator6.e(_t5);
           case 11:
             _context5.prev = 11;
-            _iterator8.f();
+            _iterator6.f();
             return _context5.finish(11);
           case 12:
             _context5.next = 13;
@@ -29381,17 +29420,17 @@
             slideLayoutResContent = _context5.sent;
             relationshipArray = slideLayoutResContent['Relationships']['Relationship'];
             if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-            _iterator9 = _createForOfIteratorHelper(relationshipArray);
+            _iterator7 = _createForOfIteratorHelper(relationshipArray);
             _context5.prev = 17;
-            _iterator9.s();
+            _iterator7.s();
           case 18:
-            if ((_step9 = _iterator9.n()).done) {
+            if ((_step7 = _iterator7.n()).done) {
               _context5.next = 22;
               break;
             }
-            _relationshipArrayItem3 = _step9.value;
-            _t8 = _relationshipArrayItem3['attrs']['Type'];
-            _context5.next = _t8 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster' ? 19 : 20;
+            _relationshipArrayItem3 = _step7.value;
+            _t6 = _relationshipArrayItem3['attrs']['Type'];
+            _context5.next = _t6 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster' ? 19 : 20;
             break;
           case 19:
             masterFilename = _relationshipArrayItem3['attrs']['Target'].replace('../', 'ppt/');
@@ -29409,11 +29448,11 @@
             break;
           case 23:
             _context5.prev = 23;
-            _t9 = _context5["catch"](17);
-            _iterator9.e(_t9);
+            _t7 = _context5["catch"](17);
+            _iterator7.e(_t7);
           case 24:
             _context5.prev = 24;
-            _iterator9.f();
+            _iterator7.f();
             return _context5.finish(24);
           case 25:
             _context5.next = 26;
@@ -29429,17 +29468,17 @@
             slideMasterResContent = _context5.sent;
             relationshipArray = slideMasterResContent['Relationships']['Relationship'];
             if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-            _iterator0 = _createForOfIteratorHelper(relationshipArray);
+            _iterator8 = _createForOfIteratorHelper(relationshipArray);
             _context5.prev = 28;
-            _iterator0.s();
+            _iterator8.s();
           case 29:
-            if ((_step0 = _iterator0.n()).done) {
+            if ((_step8 = _iterator8.n()).done) {
               _context5.next = 33;
               break;
             }
-            _relationshipArrayItem4 = _step0.value;
-            _t0 = _relationshipArrayItem4['attrs']['Type'];
-            _context5.next = _t0 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme' ? 30 : 31;
+            _relationshipArrayItem4 = _step8.value;
+            _t8 = _relationshipArrayItem4['attrs']['Type'];
+            _context5.next = _t8 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme' ? 30 : 31;
             break;
           case 30:
             themeFilename = _relationshipArrayItem4['attrs']['Target'].replace('../', 'ppt/');
@@ -29457,11 +29496,11 @@
             break;
           case 34:
             _context5.prev = 34;
-            _t1 = _context5["catch"](28);
-            _iterator0.e(_t1);
+            _t9 = _context5["catch"](28);
+            _iterator8.e(_t9);
           case 35:
             _context5.prev = 35;
-            _iterator0.f();
+            _iterator8.f();
             return _context5.finish(35);
           case 36:
             if (!themeFilename) {
@@ -29478,19 +29517,19 @@
               relationshipArray = themeResContent['Relationships']['Relationship'];
               if (relationshipArray) {
                 if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-                _iterator1 = _createForOfIteratorHelper(relationshipArray);
+                _iterator9 = _createForOfIteratorHelper(relationshipArray);
                 try {
-                  for (_iterator1.s(); !(_step1 = _iterator1.n()).done;) {
-                    relationshipArrayItem = _step1.value;
+                  for (_iterator9.s(); !(_step9 = _iterator9.n()).done;) {
+                    relationshipArrayItem = _step9.value;
                     themeResObj[relationshipArrayItem['attrs']['Id']] = {
                       'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
                       'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
                     };
                   }
                 } catch (err) {
-                  _iterator1.e(err);
+                  _iterator9.e(err);
                 } finally {
-                  _iterator1.f();
+                  _iterator9.f();
                 }
               }
             }
@@ -29517,19 +29556,19 @@
             if (digramResContent) {
               relationshipArray = digramResContent['Relationships']['Relationship'];
               if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-              _iterator10 = _createForOfIteratorHelper(relationshipArray);
+              _iterator0 = _createForOfIteratorHelper(relationshipArray);
               try {
-                for (_iterator10.s(); !(_step10 = _iterator10.n()).done;) {
-                  _relationshipArrayItem = _step10.value;
+                for (_iterator0.s(); !(_step0 = _iterator0.n()).done;) {
+                  _relationshipArrayItem = _step0.value;
                   diagramResObj[_relationshipArrayItem['attrs']['Id']] = {
                     'type': _relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
                     'target': _relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
                   };
                 }
               } catch (err) {
-                _iterator10.e(err);
+                _iterator0.e(err);
               } finally {
-                _iterator10.f();
+                _iterator0.f();
               }
             }
           case 41:
@@ -29569,23 +29608,23 @@
           case 45:
             fill = _context5.sent;
             elements = [];
-            _t10 = regenerator.keys(nodes);
+            _t0 = regenerator.keys(nodes);
           case 46:
-            if ((_t11 = _t10()).done) {
+            if ((_t1 = _t0()).done) {
               _context5.next = 55;
               break;
             }
-            nodeKey = _t11.value;
+            nodeKey = _t1.value;
             if (nodes[nodeKey].constructor !== Array) nodes[nodeKey] = [nodes[nodeKey]];
-            _iterator11 = _createForOfIteratorHelper(nodes[nodeKey]);
+            _iterator1 = _createForOfIteratorHelper(nodes[nodeKey]);
             _context5.prev = 47;
-            _iterator11.s();
+            _iterator1.s();
           case 48:
-            if ((_step11 = _iterator11.n()).done) {
+            if ((_step1 = _iterator1.n()).done) {
               _context5.next = 51;
               break;
             }
-            node = _step11.value;
+            node = _step1.value;
             _context5.next = 49;
             return processNodesInSlide(nodeKey, node, nodes, warpObj, 'slide');
           case 49:
@@ -29599,25 +29638,33 @@
             break;
           case 52:
             _context5.prev = 52;
-            _t12 = _context5["catch"](47);
-            _iterator11.e(_t12);
+            _t10 = _context5["catch"](47);
+            _iterator1.e(_t10);
           case 53:
             _context5.prev = 53;
-            _iterator11.f();
+            _iterator1.f();
             return _context5.finish(53);
           case 54:
             _context5.next = 46;
             break;
           case 55:
-            // 为空内容的幻灯片元素填充版式的默认内容
+            // 获取幻灯片使用的版式名称
+            layoutName = '';
             if (layouts.length > 0) {
-              fillEmptyContentFromLayout(elements, layoutFilename, layouts);
+              targetLayout = layouts.find(function (layout) {
+                var layoutFileName = layoutFilename.split('/').pop();
+                return layout.layoutFile && layout.layoutFile.includes(layoutFileName);
+              });
+              if (targetLayout) {
+                layoutName = targetLayout.layoutName || '';
+              }
             }
             return _context5.abrupt("return", {
               fill: fill,
               elements: elements,
               layoutElements: layoutElements,
-              note: note
+              note: note,
+              layoutName: layoutName // 添加版式名称
             });
           case 56:
           case "end":
@@ -29666,7 +29713,7 @@
   }
   function _getLayoutElements() {
     _getLayoutElements = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee6(warpObj) {
-      var elements, slideLayoutContent, slideMasterContent, nodesSldLayout, nodesSldMaster, showMasterSp, nodeKey, i, ph, ret, _ph, _ret, _nodeKey, _i, _ph2, _ret2, _ph3, _ret3, _t13, _t14, _t15, _t16;
+      var elements, slideLayoutContent, slideMasterContent, nodesSldLayout, nodesSldMaster, showMasterSp, nodeKey, i, ph, ret, _ph, _ret, _nodeKey, _i2, _ph2, _ret2, _ph3, _ret3, _t11, _t12, _t13, _t14;
       return regenerator.wrap(function (_context6) {
         while (1) switch (_context6.prev = _context6.next) {
           case 0:
@@ -29680,13 +29727,13 @@
               _context6.next = 9;
               break;
             }
-            _t13 = regenerator.keys(nodesSldLayout);
+            _t11 = regenerator.keys(nodesSldLayout);
           case 1:
-            if ((_t14 = _t13()).done) {
+            if ((_t12 = _t11()).done) {
               _context6.next = 9;
               break;
             }
-            nodeKey = _t14.value;
+            nodeKey = _t12.value;
             if (!(nodesSldLayout[nodeKey].constructor === Array)) {
               _context6.next = 6;
               break;
@@ -29733,35 +29780,35 @@
               _context6.next = 18;
               break;
             }
-            _t15 = regenerator.keys(nodesSldMaster);
+            _t13 = regenerator.keys(nodesSldMaster);
           case 10:
-            if ((_t16 = _t15()).done) {
+            if ((_t14 = _t13()).done) {
               _context6.next = 18;
               break;
             }
-            _nodeKey = _t16.value;
+            _nodeKey = _t14.value;
             if (!(nodesSldMaster[_nodeKey].constructor === Array)) {
               _context6.next = 15;
               break;
             }
-            _i = 0;
+            _i2 = 0;
           case 11:
-            if (!(_i < nodesSldMaster[_nodeKey].length)) {
+            if (!(_i2 < nodesSldMaster[_nodeKey].length)) {
               _context6.next = 14;
               break;
             }
-            _ph2 = getTextByPathList(nodesSldMaster[_nodeKey][_i], ['p:nvSpPr', 'p:nvPr', 'p:ph']);
+            _ph2 = getTextByPathList(nodesSldMaster[_nodeKey][_i2], ['p:nvSpPr', 'p:nvPr', 'p:ph']);
             if (_ph2) {
               _context6.next = 13;
               break;
             }
             _context6.next = 12;
-            return processNodesInSlide(_nodeKey, nodesSldMaster[_nodeKey][_i], nodesSldMaster, warpObj, 'slideMasterBg');
+            return processNodesInSlide(_nodeKey, nodesSldMaster[_nodeKey][_i2], nodesSldMaster, warpObj, 'slideMasterBg');
           case 12:
             _ret2 = _context6.sent;
             if (_ret2) elements.push(_ret2);
           case 13:
-            _i++;
+            _i2++;
             _context6.next = 11;
             break;
           case 14:
@@ -29796,7 +29843,7 @@
   } // 合并的版式元素处理函数，同时处理占位符和非占位符元素
   function _processSingleLayout() {
     _processSingleLayout = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee7(zip, layoutFile, themeContent, defaultTextStyle) {
-      var layoutXmlContent, sldLayout, cSld, slideLayoutResFilename, slideLayoutResContent, relationshipArray, masterFilename, diagramFilename, slideResObj, layoutResObj, masterResObj, themeResObj, diagramResObj, _iterator12, _step12, _relationshipArrayItem5, slideMasterContent, slideMasterTextStyles, slideMasterTables, slideMasterResFilename, slideMasterResContent, _iterator13, _step13, _relationshipArrayItem6, digramFileContent, digramFileContentObjToStr, digramResFileName, digramResContent, _iterator14, _step14, relationshipArrayItem, tableStyles, slideLayoutTables, warpObj, fill, _yield$processAllLayo, placeholderElements, layoutElements, layout, _t17, _t18, _t19, _t20;
+      var layoutXmlContent, sldLayout, cSld, slideLayoutResFilename, slideLayoutResContent, relationshipArray, masterFilename, diagramFilename, slideResObj, layoutResObj, masterResObj, themeResObj, diagramResObj, _iterator10, _step10, _relationshipArrayItem5, slideMasterContent, slideMasterTextStyles, slideMasterTables, slideMasterResFilename, slideMasterResContent, _iterator11, _step11, _relationshipArrayItem6, digramFileContent, digramFileContentObjToStr, digramResFileName, digramResContent, _iterator12, _step12, relationshipArrayItem, tableStyles, slideLayoutTables, warpObj, fill, layoutName, _yield$processAllLayo, placeholderElements, layoutElements, layout, _t15, _t16, _t17, _t18;
       return regenerator.wrap(function (_context7) {
         while (1) switch (_context7.prev = _context7.next) {
           case 0:
@@ -29820,17 +29867,17 @@
             masterResObj = {};
             themeResObj = {};
             diagramResObj = {}; // 处理版式的关系文件，类似于processSingleSlide
-            _iterator12 = _createForOfIteratorHelper(relationshipArray);
+            _iterator10 = _createForOfIteratorHelper(relationshipArray);
             _context7.prev = 3;
-            _iterator12.s();
+            _iterator10.s();
           case 4:
-            if ((_step12 = _iterator12.n()).done) {
+            if ((_step10 = _iterator10.n()).done) {
               _context7.next = 9;
               break;
             }
-            _relationshipArrayItem5 = _step12.value;
-            _t17 = _relationshipArrayItem5['attrs']['Type'];
-            _context7.next = _t17 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster' ? 5 : _t17 === 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing' ? 6 : _t17 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ? 7 : _t17 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart' ? 7 : _t17 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink' ? 7 : 7;
+            _relationshipArrayItem5 = _step10.value;
+            _t15 = _relationshipArrayItem5['attrs']['Type'];
+            _context7.next = _t15 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster' ? 5 : _t15 === 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing' ? 6 : _t15 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ? 7 : _t15 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart' ? 7 : _t15 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink' ? 7 : 7;
             break;
           case 5:
             masterFilename = _relationshipArrayItem5['attrs']['Target'].replace('../', 'ppt/');
@@ -29855,11 +29902,11 @@
             break;
           case 10:
             _context7.prev = 10;
-            _t18 = _context7["catch"](3);
-            _iterator12.e(_t18);
+            _t16 = _context7["catch"](3);
+            _iterator10.e(_t16);
           case 11:
             _context7.prev = 11;
-            _iterator12.f();
+            _iterator10.f();
             return _context7.finish(11);
           case 12:
             _context7.next = 13;
@@ -29879,17 +29926,17 @@
             slideMasterResContent = _context7.sent;
             relationshipArray = slideMasterResContent['Relationships']['Relationship'];
             if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-            _iterator13 = _createForOfIteratorHelper(relationshipArray);
+            _iterator11 = _createForOfIteratorHelper(relationshipArray);
             _context7.prev = 16;
-            _iterator13.s();
+            _iterator11.s();
           case 17:
-            if ((_step13 = _iterator13.n()).done) {
+            if ((_step11 = _iterator11.n()).done) {
               _context7.next = 21;
               break;
             }
-            _relationshipArrayItem6 = _step13.value;
-            _t19 = _relationshipArrayItem6['attrs']['Type'];
-            _context7.next = _t19 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme' ? 18 : 19;
+            _relationshipArrayItem6 = _step11.value;
+            _t17 = _relationshipArrayItem6['attrs']['Type'];
+            _context7.next = _t17 === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme' ? 18 : 19;
             break;
           case 18:
             return _context7.abrupt("continue", 20);
@@ -29906,11 +29953,11 @@
             break;
           case 22:
             _context7.prev = 22;
-            _t20 = _context7["catch"](16);
-            _iterator13.e(_t20);
+            _t18 = _context7["catch"](16);
+            _iterator11.e(_t18);
           case 23:
             _context7.prev = 23;
-            _iterator13.f();
+            _iterator11.f();
             return _context7.finish(23);
           case 24:
             // 处理diagram相关内容
@@ -29935,19 +29982,19 @@
             if (digramResContent) {
               relationshipArray = digramResContent['Relationships']['Relationship'];
               if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray];
-              _iterator14 = _createForOfIteratorHelper(relationshipArray);
+              _iterator12 = _createForOfIteratorHelper(relationshipArray);
               try {
-                for (_iterator14.s(); !(_step14 = _iterator14.n()).done;) {
-                  relationshipArrayItem = _step14.value;
+                for (_iterator12.s(); !(_step12 = _iterator12.n()).done;) {
+                  relationshipArrayItem = _step12.value;
                   diagramResObj[relationshipArrayItem['attrs']['Id']] = {
                     'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
                     'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
                   };
                 }
               } catch (err) {
-                _iterator14.e(err);
+                _iterator12.e(err);
               } finally {
-                _iterator14.f();
+                _iterator12.f();
               }
             }
           case 27:
@@ -29984,7 +30031,8 @@
             // 将layoutFile信息添加到warpObj中，用于调试
             warpObj.layoutFile = layoutFile;
 
-            // 处理版式中的所有元素，分别返回占位符和非占位符元素
+            // 获取版式名称
+            layoutName = getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'attrs', 'name']) || getTextByPathList(layoutXmlContent, ['p:sldLayout', 'attrs', 'name']) || getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'p:nvGrpSpPr', 'p:cNvPr', 'attrs', 'name']) || ''; // 处理版式中的所有元素，分别返回占位符和非占位符元素
             _context7.next = 31;
             return processAllLayoutElements(cSld, warpObj);
           case 31:
@@ -30003,7 +30051,9 @@
               // 版式的非占位符元素（图片、形状等）
               note: '',
               // 版式没有备注
-              layoutFile: layoutFile // 添加版式文件名，用于幻灯片匹配
+              layoutFile: layoutFile,
+              // 添加版式文件名，用于幻灯片匹配
+              layoutName: layoutName // 添加版式名称
             };
             return _context7.abrupt("return", layout);
           case 32:
@@ -30016,10 +30066,10 @@
   }
   function processAllLayoutElements(_x12, _x13) {
     return _processAllLayoutElements.apply(this, arguments);
-  } // 为空内容的幻灯片元素填充版式的默认内容
+  }
   function _processAllLayoutElements() {
     _processAllLayoutElements = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee8(cSld, warpObj) {
-      var placeholderElements, layoutElements, spTree, nodeKey, nodes, _iterator15, _step15, node, ph, element, _t21, _t22, _t23;
+      var placeholderElements, layoutElements, spTree, nodeKey, nodes, _iterator13, _step13, node, ph, element, _t19, _t20, _t21;
       return regenerator.wrap(function (_context8) {
         while (1) switch (_context8.prev = _context8.next) {
           case 0:
@@ -30035,13 +30085,13 @@
             });
           case 1:
             spTree = cSld['p:spTree'];
-            _t21 = regenerator.keys(spTree);
+            _t19 = regenerator.keys(spTree);
           case 2:
-            if ((_t22 = _t21()).done) {
+            if ((_t20 = _t19()).done) {
               _context8.next = 12;
               break;
             }
-            nodeKey = _t22.value;
+            nodeKey = _t20.value;
             if (!(nodeKey === 'p:nvGrpSpPr' || nodeKey === 'p:grpSpPr' || nodeKey === 'attrs')) {
               _context8.next = 3;
               break;
@@ -30049,15 +30099,15 @@
             return _context8.abrupt("continue", 2);
           case 3:
             nodes = spTree[nodeKey].constructor === Array ? spTree[nodeKey] : [spTree[nodeKey]];
-            _iterator15 = _createForOfIteratorHelper(nodes);
+            _iterator13 = _createForOfIteratorHelper(nodes);
             _context8.prev = 4;
-            _iterator15.s();
+            _iterator13.s();
           case 5:
-            if ((_step15 = _iterator15.n()).done) {
+            if ((_step13 = _iterator13.n()).done) {
               _context8.next = 8;
               break;
             }
-            node = _step15.value;
+            node = _step13.value;
             // 检查是否是占位符节点
             ph = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph']); // 处理节点
             _context8.next = 6;
@@ -30080,11 +30130,11 @@
             break;
           case 9:
             _context8.prev = 9;
-            _t23 = _context8["catch"](4);
-            _iterator15.e(_t23);
+            _t21 = _context8["catch"](4);
+            _iterator13.e(_t21);
           case 10:
             _context8.prev = 10;
-            _iterator15.f();
+            _iterator13.f();
             return _context8.finish(10);
           case 11:
             _context8.next = 2;
@@ -30101,115 +30151,6 @@
       }, _callee8, null, [[4, 9, 10, 11]]);
     }));
     return _processAllLayoutElements.apply(this, arguments);
-  }
-  function fillEmptyContentFromLayout(slideElements, layoutFilename, layouts) {
-    // 找到对应的版式
-    var targetLayout = layouts.find(function (layout) {
-      // 通过文件名匹配版式（需要处理路径差异）
-      var layoutName = layoutFilename.split('/').pop(); // 获取文件名部分
-      return layout.layoutFile && layout.layoutFile.includes(layoutName);
-    });
-    if (!targetLayout) return;
-
-    // 获取版式中的所有占位符元素（包括text和shape类型）
-    var layoutPlaceholderElements = targetLayout.elements.filter(function (el) {
-      return el.type === 'text' || el.type === 'shape' && el.name && el.name.toLowerCase().includes('placeholder');
-    });
-
-    // 为空内容的幻灯片文本元素填充版式内容
-    slideElements.forEach(function (slideElement) {
-      if (slideElement.type === 'text') {
-        // 使用hasRealText标记判断是否为空内容，这比检查HTML更准确
-        var isEmpty = !slideElement.hasRealText;
-        if (isEmpty) {
-          // 找到位置最接近的版式占位符元素
-          var matchedLayoutElement = findClosestLayoutElement(slideElement, layoutPlaceholderElements);
-          if (matchedLayoutElement && matchedLayoutElement.content) {
-            slideElement.content = matchedLayoutElement.content;
-          }
-        }
-      }
-    });
-  }
-
-  // 找到最匹配的版式元素（多维度匹配）
-  function findClosestLayoutElement(slideElement, layoutElements) {
-    if (layoutElements.length === 0) return null;
-    var bestMatch = null;
-    var bestScore = -1;
-    layoutElements.forEach(function (layoutElement) {
-      var score = 0;
-
-      // 1. 名称匹配（最重要的匹配条件）
-      if (slideElement.name && layoutElement.name) {
-        if (slideElement.name === layoutElement.name) {
-          score += 100; // 名称完全匹配，给最高分
-        } else if (slideElement.name.toLowerCase().includes(layoutElement.name.toLowerCase()) || layoutElement.name.toLowerCase().includes(slideElement.name.toLowerCase())) {
-          score += 50; // 名称部分匹配
-        }
-      }
-
-      // 2. 位置匹配（精确位置匹配优先）
-      var dx = Math.abs(slideElement.left - layoutElement.left);
-      var dy = Math.abs(slideElement.top - layoutElement.top);
-      var positionDistance = Math.sqrt(dx * dx + dy * dy);
-      if (positionDistance < 1) {
-        score += 80; // 位置几乎完全匹配
-      } else if (positionDistance < 50) {
-        score += 60; // 位置比较接近
-      } else if (positionDistance < 100) {
-        score += 30; // 位置一般接近
-      } else if (positionDistance < 200) {
-        score += 10; // 位置较远但可接受
-      }
-
-      // 3. 尺寸匹配
-      var widthDiff = Math.abs(slideElement.width - layoutElement.width);
-      var heightDiff = Math.abs(slideElement.height - layoutElement.height);
-      if (widthDiff < 10 && heightDiff < 10) {
-        score += 20; // 尺寸几乎匹配
-      } else if (widthDiff < 50 && heightDiff < 50) {
-        score += 10; // 尺寸比较接近
-      }
-
-      // 4. 内容类型匹配（基于name判断）
-      if (slideElement.name && layoutElement.name) {
-        var slideType = getElementTypeFromName(slideElement.name);
-        var layoutType = getElementTypeFromName(layoutElement.name);
-        if (slideType === layoutType && slideType !== 'unknown') {
-          score += 30; // 类型匹配
-        }
-      }
-
-      // 5. 如果版式元素很少，给予额外分数（避免无匹配）
-      if (layoutElements.length <= 2) {
-        score += 15; // 版式元素稀少时的补偿分数
-      }
-
-      // 6. 如果是唯一的版式元素，再给额外分数
-      if (layoutElements.length === 1) {
-        score += 20; // 唯一版式元素的额外分数
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = layoutElement;
-      }
-    });
-
-    // 如果有任何匹配就返回
-    return bestScore > 0 ? bestMatch : null;
-  }
-
-  // 根据元素名称判断类型
-  function getElementTypeFromName(name) {
-    if (!name) return 'unknown';
-    var lowerName = name.toLowerCase();
-    if (lowerName.includes('title')) return 'title';
-    if (lowerName.includes('content') || lowerName.includes('placeholder')) return 'content';
-    if (lowerName.includes('subtitle')) return 'subtitle';
-    if (lowerName.includes('footer')) return 'footer';
-    if (lowerName.includes('header')) return 'header';
-    return 'unknown';
   }
   function indexNodes(content) {
     var keys = Object.keys(content);
@@ -30266,12 +30207,12 @@
   }
   function _processNodesInSlide() {
     _processNodesInSlide = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee9(nodeKey, nodeValue, nodes, warpObj, source) {
-      var json, _t24;
+      var json, _t22;
       return regenerator.wrap(function (_context9) {
         while (1) switch (_context9.prev = _context9.next) {
           case 0:
-            _t24 = nodeKey;
-            _context9.next = _t24 === 'p:sp' ? 1 : _t24 === 'p:cxnSp' ? 3 : _t24 === 'p:pic' ? 5 : _t24 === 'p:graphicFrame' ? 7 : _t24 === 'p:grpSp' ? 9 : _t24 === 'mc:AlternateContent' ? 11 : 16;
+            _t22 = nodeKey;
+            _context9.next = _t22 === 'p:sp' ? 1 : _t22 === 'p:cxnSp' ? 3 : _t22 === 'p:pic' ? 5 : _t22 === 'p:graphicFrame' ? 7 : _t22 === 'p:grpSp' ? 9 : _t22 === 'mc:AlternateContent' ? 11 : 16;
             break;
           case 1:
             _context9.next = 2;
@@ -30387,7 +30328,7 @@
   }
   function _processGroupSpNode() {
     _processGroupSpNode = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee1(node, warpObj, source) {
-      var order, xfrmNode, x, y, chx, chy, cx, cy, chcx, chcy, isFlipV, isFlipH, rotate, ws, hs, elements, nodeKey, _iterator16, _step16, item, ret, _ret4, _t25, _t26, _t27;
+      var order, xfrmNode, x, y, chx, chy, cx, cy, chcx, chcy, isFlipV, isFlipH, rotate, ws, hs, elements, nodeKey, _iterator14, _step14, item, ret, _ret4, _t23, _t24, _t25;
       return regenerator.wrap(function (_context1) {
         while (1) switch (_context1.prev = _context1.next) {
           case 0:
@@ -30414,26 +30355,26 @@
             ws = cx / chcx;
             hs = cy / chcy;
             elements = [];
-            _t25 = regenerator.keys(node);
+            _t23 = regenerator.keys(node);
           case 2:
-            if ((_t26 = _t25()).done) {
+            if ((_t24 = _t23()).done) {
               _context1.next = 14;
               break;
             }
-            nodeKey = _t26.value;
+            nodeKey = _t24.value;
             if (!(node[nodeKey].constructor === Array)) {
               _context1.next = 11;
               break;
             }
-            _iterator16 = _createForOfIteratorHelper(node[nodeKey]);
+            _iterator14 = _createForOfIteratorHelper(node[nodeKey]);
             _context1.prev = 3;
-            _iterator16.s();
+            _iterator14.s();
           case 4:
-            if ((_step16 = _iterator16.n()).done) {
+            if ((_step14 = _iterator14.n()).done) {
               _context1.next = 7;
               break;
             }
-            item = _step16.value;
+            item = _step14.value;
             _context1.next = 5;
             return processNodesInSlide(nodeKey, item, node, warpObj, source);
           case 5:
@@ -30447,11 +30388,11 @@
             break;
           case 8:
             _context1.prev = 8;
-            _t27 = _context1["catch"](3);
-            _iterator16.e(_t27);
+            _t25 = _context1["catch"](3);
+            _iterator14.e(_t25);
           case 9:
             _context1.prev = 9;
-            _iterator16.f();
+            _iterator14.f();
             return _context1.finish(9);
           case 10:
             _context1.next = 13;
@@ -30570,7 +30511,7 @@
   }
   function _genShape() {
     _genShape = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee12(node, pNode, slideLayoutSpNode, slideMasterSpNode, name, type, order, warpObj, source) {
-      var xfrmList, slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode, shapType, custShapType, _getPosition2, top, left, _getSize2, width, height, isFlipV, isFlipH, rotate, txtXframeNode, txtRotate, txtXframeRot, content, hasRealText, textResult, _getBorder, borderColor, borderWidth, borderType, strokeDasharray, fill, shadow, outerShdwNode, vAlign, isVertical, idx, layoutElement, layoutShapType, layoutTextResult, data, isHasValidText, ext, w, h, d, shapePath, _t28;
+      var xfrmList, slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode, shapType, custShapType, _getPosition2, top, left, _getSize2, width, height, isFlipV, isFlipH, rotate, txtXframeNode, txtRotate, txtXframeRot, content, hasRealText, plainText, textResult, _getBorder, borderColor, borderWidth, borderType, strokeDasharray, fill, shadow, outerShdwNode, vAlign, isVertical, idx, phNode, phType, originalPhType, layoutElement, layoutShapType, layoutTextResult, data, isHasValidText, ext, w, h, d, shapePath, _t26;
       return regenerator.wrap(function (_context12) {
         while (1) switch (_context12.prev = _context12.next) {
           case 0:
@@ -30592,47 +30533,77 @@
             } else txtRotate = rotate;
             content = '';
             hasRealText = false;
+            plainText = ''; // 添加纯文本内容
             if (node['p:txBody']) {
               textResult = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj);
               content = textResult.content;
               hasRealText = textResult.hasRealText;
+              plainText = extractPlainText(node['p:txBody']); // 提取纯文本
             }
             _getBorder = getBorder(node, type, warpObj), borderColor = _getBorder.borderColor, borderWidth = _getBorder.borderWidth, borderType = _getBorder.borderType, strokeDasharray = _getBorder.strokeDasharray;
             _context12.next = 1;
             return getShapeFill(node, pNode, undefined, warpObj, source);
           case 1:
-            _t28 = _context12.sent;
-            if (_t28) {
+            _t26 = _context12.sent;
+            if (_t26) {
               _context12.next = 2;
               break;
             }
-            _t28 = '';
+            _t26 = '';
           case 2:
-            fill = _t28;
+            fill = _t26;
             outerShdwNode = getTextByPathList(node, ['p:spPr', 'a:effectLst', 'a:outerShdw']);
             if (outerShdwNode) shadow = getShadow(outerShdwNode, warpObj);
             vAlign = getVerticalAlign(node, slideLayoutSpNode, slideMasterSpNode);
-            isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'; // 获取idx信息
-            idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx']); // 如果slide元素有idx，则从layout同步shapType和文本内容
-            if (idx && source !== 'layout') {
-              if (warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
-                layoutElement = warpObj['slideLayoutTables']['idxTable'][idx];
-                if (layoutElement) {
-                  // 1. 同步shapType（如果slide没有shapType）
-                  if (!shapType) {
-                    layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst']);
-                    if (layoutShapType) {
-                      shapType = layoutShapType;
-                    }
-                  }
+            isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'; // 获取idx信息和占位符类型
+            idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx']);
+            phNode = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph']);
+            if (phNode) {
+              // 有占位符节点的情况
+              originalPhType = getTextByPathList(phNode, ['attrs', 'type']);
+              if (!originalPhType || originalPhType === '') {
+                phType = 'any'; // 有ph但phType为空时设置为any
+              } else if (originalPhType === 'body') {
+                phType = 'text'; // phType为body时设置为text
+              } else {
+                phType = originalPhType; // 其他都按原本的来
+              }
+            } else {
+              // 没有占位符节点的情况
+              phType = undefined;
+            }
 
-                  // 2. 同步文本内容（如果slide内容为空）
-                  if (!hasRealText && layoutElement['p:txBody']) {
-                    layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj);
-                    if (layoutTextResult.hasRealText) {
-                      content = layoutTextResult.content;
-                      hasRealText = layoutTextResult.hasRealText;
-                    }
+            // 从layout同步shapType和文本内容
+            if (source !== 'layout') {
+              layoutElement = null; // 获取对应的版式元素
+              if (phType === 'title' && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['typeTable']) {
+                // title类型：通过类型匹配
+                if (idx) {
+                  layoutElement = warpObj['slideLayoutTables']['typeTable']["title_".concat(idx)];
+                }
+                if (!layoutElement) {
+                  layoutElement = warpObj['slideLayoutTables']['typeTable']['title'];
+                }
+              } else if (idx && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
+                // 其他类型：通过idx匹配
+                layoutElement = warpObj['slideLayoutTables']['idxTable'][idx];
+              }
+              if (layoutElement) {
+                // 1. 同步shapType（如果slide没有shapType）
+                if (!shapType) {
+                  layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst']);
+                  if (layoutShapType) {
+                    shapType = layoutShapType;
+                  }
+                }
+
+                // 2. 同步文本内容（如果slide内容为空）
+                if (!hasRealText && layoutElement['p:txBody']) {
+                  layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj);
+                  if (layoutTextResult.hasRealText) {
+                    content = layoutTextResult.content;
+                    hasRealText = layoutTextResult.hasRealText;
+                    plainText = extractPlainText(layoutElement['p:txBody']); // 同步纯文本
                   }
                 }
               }
@@ -30654,7 +30625,11 @@
               vAlign: vAlign,
               name: name,
               order: order,
-              idx: idx // 添加idx信息
+              idx: idx,
+              // 添加idx信息
+              phType: phType,
+              // 添加占位符类型
+              plainText: plainText // 添加纯文本内容
             };
             if (shadow) data.shadow = shadow;
             isHasValidText = data.content && hasValidText(data.content);
@@ -30727,7 +30702,6 @@
               _context13.next = 1;
               break;
             }
-            console.warn("\u56FE\u7247\u8D44\u6E90\u672A\u627E\u5230: rid=".concat(rid, ", source=").concat(source));
             return _context13.abrupt("return", null);
           case 1:
             imgName = resObj[rid]['target'];
@@ -30924,13 +30898,13 @@
   }
   function _processGraphicFrameNode() {
     _processGraphicFrameNode = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee14(node, warpObj, source) {
-      var graphicTypeUri, result, oleObjNode, _t29;
+      var graphicTypeUri, result, oleObjNode, _t27;
       return regenerator.wrap(function (_context14) {
         while (1) switch (_context14.prev = _context14.next) {
           case 0:
             graphicTypeUri = getTextByPathList(node, ['a:graphic', 'a:graphicData', 'attrs', 'uri']);
-            _t29 = graphicTypeUri;
-            _context14.next = _t29 === 'http://schemas.openxmlformats.org/drawingml/2006/table' ? 1 : _t29 === 'http://schemas.openxmlformats.org/drawingml/2006/chart' ? 3 : _t29 === 'http://schemas.openxmlformats.org/drawingml/2006/diagram' ? 5 : _t29 === 'http://schemas.openxmlformats.org/presentationml/2006/ole' ? 7 : 10;
+            _t27 = graphicTypeUri;
+            _context14.next = _t27 === 'http://schemas.openxmlformats.org/drawingml/2006/table' ? 1 : _t27 === 'http://schemas.openxmlformats.org/drawingml/2006/chart' ? 3 : _t27 === 'http://schemas.openxmlformats.org/drawingml/2006/diagram' ? 5 : _t27 === 'http://schemas.openxmlformats.org/presentationml/2006/ole' ? 7 : 10;
             break;
           case 1:
             _context14.next = 2;
@@ -30978,7 +30952,7 @@
   }
   function _genTable() {
     _genTable = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee15(node, warpObj) {
-      var order, tableNode, xfrmNode, _getPosition4, top, left, _getSize4, width, height, getTblPr, getColsGrid, colWidths, _iterator17, _step17, item, colWidthParam, colWidth, firstRowAttr, firstColAttr, lastRowAttr, lastColAttr, bandRowAttr, bandColAttr, tblStylAttrObj, thisTblStyle, tbleStyleId, tbleStylList, k, borders, tblStyl, tblBorderStyl, tbl_bgcolor, tbl_bgFillschemeClr, trNodes, data, rowHeights, i, trNode, rowHeightParam, rowHeight, _getTableRowParams, fillColor, fontColor, fontBold, tcNodes, tr, j, tcNode, a_sorce, aBandNode, textResult, cell, td, _a_sorce, _aBandNode, _textResult, _cell, _td;
+      var order, tableNode, xfrmNode, _getPosition4, top, left, _getSize4, width, height, getTblPr, getColsGrid, colWidths, _iterator15, _step15, item, colWidthParam, colWidth, firstRowAttr, firstColAttr, lastRowAttr, lastColAttr, bandRowAttr, bandColAttr, tblStylAttrObj, thisTblStyle, tbleStyleId, tbleStylList, k, borders, tblStyl, tblBorderStyl, tbl_bgcolor, tbl_bgFillschemeClr, trNodes, data, rowHeights, i, trNode, rowHeightParam, rowHeight, _getTableRowParams, fillColor, fontColor, fontBold, tcNodes, tr, j, tcNode, a_sorce, aBandNode, textResult, cell, td, _a_sorce, _aBandNode, _textResult, _cell, _td;
       return regenerator.wrap(function (_context15) {
         while (1) switch (_context15.prev = _context15.next) {
           case 0:
@@ -30992,18 +30966,18 @@
             if (getColsGrid.constructor !== Array) getColsGrid = [getColsGrid];
             colWidths = [];
             if (getColsGrid) {
-              _iterator17 = _createForOfIteratorHelper(getColsGrid);
+              _iterator15 = _createForOfIteratorHelper(getColsGrid);
               try {
-                for (_iterator17.s(); !(_step17 = _iterator17.n()).done;) {
-                  item = _step17.value;
+                for (_iterator15.s(); !(_step15 = _iterator15.n()).done;) {
+                  item = _step15.value;
                   colWidthParam = getTextByPathList(item, ['attrs', 'w']) || 0;
                   colWidth = parseInt(colWidthParam) * RATIO_EMUs_Points;
                   colWidths.push(colWidth);
                 }
               } catch (err) {
-                _iterator17.e(err);
+                _iterator15.e(err);
               } finally {
-                _iterator17.f();
+                _iterator15.f();
               }
             }
             firstRowAttr = getTblPr['attrs'] ? getTblPr['attrs']['firstRow'] : undefined;
@@ -31251,7 +31225,7 @@
   }
   function _genDiagram() {
     _genDiagram = _asyncToGenerator(/*#__PURE__*/regenerator.mark(function _callee17(node, warpObj) {
-      var order, xfrmNode, _getPosition6, left, top, _getSize6, width, height, dgmDrwSpArray, elements, _iterator18, _step18, item, el, _t30;
+      var order, xfrmNode, _getPosition6, left, top, _getSize6, width, height, dgmDrwSpArray, elements, _iterator16, _step16, item, el, _t28;
       return regenerator.wrap(function (_context17) {
         while (1) switch (_context17.prev = _context17.next) {
           case 0:
@@ -31265,15 +31239,15 @@
               _context17.next = 8;
               break;
             }
-            _iterator18 = _createForOfIteratorHelper(dgmDrwSpArray);
+            _iterator16 = _createForOfIteratorHelper(dgmDrwSpArray);
             _context17.prev = 1;
-            _iterator18.s();
+            _iterator16.s();
           case 2:
-            if ((_step18 = _iterator18.n()).done) {
+            if ((_step16 = _iterator16.n()).done) {
               _context17.next = 5;
               break;
             }
-            item = _step18.value;
+            item = _step16.value;
             _context17.next = 3;
             return processSpNode(item, node, warpObj, 'diagramBg');
           case 3:
@@ -31287,11 +31261,11 @@
             break;
           case 6:
             _context17.prev = 6;
-            _t30 = _context17["catch"](1);
-            _iterator18.e(_t30);
+            _t28 = _context17["catch"](1);
+            _iterator16.e(_t28);
           case 7:
             _context17.prev = 7;
-            _iterator18.f();
+            _iterator16.f();
             return _context17.finish(7);
           case 8:
             return _context17.abrupt("return", {
