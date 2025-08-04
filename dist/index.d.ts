@@ -59,6 +59,8 @@ export interface Shape {
   path?: string
   name: string
   order: number
+  phType?: string
+  plainText?: string
 }
 
 export interface Text {
@@ -81,6 +83,8 @@ export interface Text {
   vAlign: string
   name: string
   order: number
+  phType?: string
+  plainText?: string
 }
 
 export interface Image {
