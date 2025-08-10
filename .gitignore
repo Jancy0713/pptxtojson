@@ -21,3 +21,4 @@ pnpm-debug.log*
 *.sw?
 
 yarn.lock
+test-file/*
