@@ -5,7 +5,7 @@ import { getSlideBackgroundFill, getShapeFill, getSolidFill, getPicFill } from '
 import { getChartInfo } from './chart'
 import { getVerticalAlign } from './align'
 import { getPosition, getSize } from './position'
-import { genTextBody } from './text'
+import { genTextBody, extractPlainText } from './text'
 import { getCustomShapePath } from './shape'
 import { extractFileExtension, base64ArrayBuffer, getTextByPathList, angleToDegrees, getMimeType, isVideoLink, escapeHtml, hasValidText } from './utils'
 import { getShadow } from './shadow'
@@ -16,20 +16,32 @@ import { getShapePath } from './shapePath'
 
 export async function parse(file) {
   const slides = []
-  
+
   const zip = await JSZip.loadAsync(file)
 
   const filesInfo = await getContentTypes(zip)
   const { width, height, defaultTextStyle } = await getSlideInfo(zip)
   const { themeContent, themeColors } = await getTheme(zip)
 
-  for (const filename of filesInfo.slides) {
-    const singleSlide = await processSingleSlide(zip, filename, themeContent, defaultTextStyle)
+  // 先处理版式，获取占位符信息
+  const layouts = []
+  for (let i = 0; i < filesInfo.slideLayouts.length; i++) {
+    const filename = filesInfo.slideLayouts[i]
+    const singleLayout = await processSingleLayout(zip, filename, themeContent, defaultTextStyle)
+    layouts.push(singleLayout)
+  }
+
+  // 再处理幻灯片，传入版式信息以获取占位符
+  for (let i = 0; i < filesInfo.slides.length; i++) {
+    const filename = filesInfo.slides[i]
+
+    const singleSlide = await processSingleSlide(zip, filename, themeContent, defaultTextStyle, layouts)
     slides.push(singleSlide)
   }
 
   return {
     slides,
+    layouts,
     themeColors,
     size: {
       width,
@@ -113,7 +125,7 @@ async function getTheme(zip) {
   return { themeContent, themeColors }
 }
 
-async function processSingleSlide(zip, sldFileName, themeContent, defaultTextStyle) {
+async function processSingleSlide(zip, sldFileName, themeContent, defaultTextStyle, layouts = []) {
   const resName = sldFileName.replace('slides/slide', 'slides/_rels/slide') + '.rels'
   const resContent = await readXmlFile(zip, resName)
   let relationshipArray = resContent['Relationships']['Relationship']
@@ -274,11 +286,26 @@ async function processSingleSlide(zip, sldFileName, themeContent, defaultTextSty
     }
   }
 
+
+
+  // 获取幻灯片使用的版式名称
+  let layoutName = ''
+  if (layouts.length > 0) {
+    const targetLayout = layouts.find(layout => {
+      const layoutFileName = layoutFilename.split('/').pop()
+      return layout.layoutFile && layout.layoutFile.includes(layoutFileName)
+    })
+    if (targetLayout) {
+      layoutName = targetLayout.layoutName || ''
+    }
+  }
+
   return {
     fill,
     elements,
     layoutElements,
     note,
+    layoutName, // 添加版式名称
   }
 }
 
@@ -352,6 +379,193 @@ async function getLayoutElements(warpObj) {
   return elements
 }
 
+async function processSingleLayout(zip, layoutFile, themeContent, defaultTextStyle) {
+  // 读取版式XML文件
+  const layoutXmlContent = await readXmlFile(zip, layoutFile)
+
+  const sldLayout = layoutXmlContent['p:sldLayout']
+  const cSld = getTextByPathList(sldLayout, ['p:cSld'])
+
+  // 加载版式资源和关系，参考processSingleSlide的处理方式
+  const slideLayoutResFilename = layoutFile.replace('slideLayouts/slideLayout', 'slideLayouts/_rels/slideLayout') + '.rels'
+  const slideLayoutResContent = await readXmlFile(zip, slideLayoutResFilename)
+  let relationshipArray = slideLayoutResContent['Relationships']['Relationship']
+  if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+
+  let masterFilename = ''
+  // let themeFilename = ''
+  let diagramFilename = ''
+  const slideResObj = {}
+  const layoutResObj = {}
+  const masterResObj = {}
+  const themeResObj = {}
+  const diagramResObj = {}
+
+  // 处理版式的关系文件，类似于processSingleSlide
+  for (const relationshipArrayItem of relationshipArray) {
+    switch (relationshipArrayItem['attrs']['Type']) {
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster':
+        masterFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        break
+      case 'http://schemas.microsoft.com/office/2007/relationships/diagramDrawing':
+        diagramFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        slideResObj[relationshipArrayItem['attrs']['Id']] = {
+          type: relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          target: relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+        break
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image':
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart':
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink':
+      default:
+        layoutResObj[relationshipArrayItem['attrs']['Id']] = {
+          type: relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          target: relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+    }
+  }
+
+  // 加载slideMaster内容
+  const slideMasterContent = await readXmlFile(zip, masterFilename)
+  const slideMasterTextStyles = getTextByPathList(slideMasterContent, ['p:sldMaster', 'p:txStyles'])
+  const slideMasterTables = await indexNodes(slideMasterContent)
+
+  // 处理slideMaster的关系文件
+  const slideMasterResFilename = masterFilename.replace('slideMasters/slideMaster', 'slideMasters/_rels/slideMaster') + '.rels'
+  const slideMasterResContent = await readXmlFile(zip, slideMasterResFilename)
+  relationshipArray = slideMasterResContent['Relationships']['Relationship']
+  if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+
+  for (const relationshipArrayItem of relationshipArray) {
+    switch (relationshipArrayItem['attrs']['Type']) {
+      case 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme':
+        // themeFilename = relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        break
+      default:
+        masterResObj[relationshipArrayItem['attrs']['Id']] = {
+          'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+    }
+  }
+
+  // 处理diagram相关内容
+  let digramFileContent = {}
+  if (diagramFilename) {
+    digramFileContent = await readXmlFile(zip, diagramFilename)
+    if (digramFileContent) {
+      const digramFileContentObjToStr = JSON.stringify(digramFileContent).replace(/dsp:/g, 'p:')
+      digramFileContent = JSON.parse(digramFileContentObjToStr)
+    }
+    const digramResFileName = diagramFilename.replace('diagrams/data', 'diagrams/_rels/data') + '.rels'
+    const digramResContent = await readXmlFile(zip, digramResFileName)
+    if (digramResContent) {
+      relationshipArray = digramResContent['Relationships']['Relationship']
+      if (relationshipArray.constructor !== Array) relationshipArray = [relationshipArray]
+      for (const relationshipArrayItem of relationshipArray) {
+        diagramResObj[relationshipArrayItem['attrs']['Id']] = {
+          'type': relationshipArrayItem['attrs']['Type'].replace('http://schemas.openxmlformats.org/officeDocument/2006/relationships/', ''),
+          'target': relationshipArrayItem['attrs']['Target'].replace('../', 'ppt/')
+        }
+      }
+    }
+  }
+
+  const tableStyles = await readXmlFile(zip, 'ppt/tableStyles.xml')
+
+  // 创建warpObj，与processSingleSlide保持完全一致
+  const slideLayoutTables = await indexNodes(layoutXmlContent)
+
+  const warpObj = {
+    zip,
+    slideLayoutContent: layoutXmlContent,
+    slideLayoutTables,
+    slideMasterContent,
+    slideMasterTables,
+    slideContent: layoutXmlContent,
+    tableStyles,
+    slideResObj,
+    slideMasterTextStyles,
+    layoutResObj,
+    masterResObj,
+    themeContent,
+    themeResObj,
+    digramFileContent,
+    diagramResObj,
+    defaultTextStyle,
+  }
+
+  // 处理版式背景
+  const fill = await getSlideBackgroundFill(warpObj)
+
+  // 将layoutFile信息添加到warpObj中，用于调试
+  warpObj.layoutFile = layoutFile
+
+  // 获取版式名称
+  const layoutName = getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'attrs', 'name']) ||
+                    getTextByPathList(layoutXmlContent, ['p:sldLayout', 'attrs', 'name']) ||
+                    getTextByPathList(layoutXmlContent, ['p:sldLayout', 'p:cSld', 'p:nvGrpSpPr', 'p:cNvPr', 'attrs', 'name']) ||
+                    ''
+
+  // 处理版式中的所有元素，分别返回占位符和非占位符元素
+  const { placeholderElements, layoutElements } = await processAllLayoutElements(cSld, warpObj)
+
+  // 构建版式对象，格式与slide完全一致
+  // 对于版式：
+  // - elements: 占位符元素
+  // - layoutElements: 非占位符元素（图片、形状等）
+  const layout = {
+    fill,
+    elements: placeholderElements, // 版式的占位符元素
+    layoutElements, // 版式的非占位符元素（图片、形状等）
+    note: '', // 版式没有备注
+    layoutFile, // 添加版式文件名，用于幻灯片匹配
+    layoutName, // 添加版式名称
+  }
+
+  return layout
+}
+
+// 合并的版式元素处理函数，同时处理占位符和非占位符元素
+async function processAllLayoutElements(cSld, warpObj) {
+  const placeholderElements = []
+  const layoutElements = []
+
+  if (!cSld || !cSld['p:spTree']) {
+    return { placeholderElements, layoutElements }
+  }
+
+  const spTree = cSld['p:spTree']
+
+  for (const nodeKey in spTree) {
+    if (nodeKey === 'p:nvGrpSpPr' || nodeKey === 'p:grpSpPr' || nodeKey === 'attrs') {
+      continue
+    }
+
+    const nodes = spTree[nodeKey].constructor === Array ? spTree[nodeKey] : [spTree[nodeKey]]
+
+    for (const node of nodes) {
+      // 检查是否是占位符节点
+      const ph = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph'])
+
+      // 处理节点
+      const element = await processNodesInSlide(nodeKey, node, nodes, warpObj, 'layout')
+      if (element) {
+        // 根据是否是占位符，放入不同的数组
+        if (ph && ph['attrs']) {
+          placeholderElements.push(element) // 占位符元素
+        }
+        else {
+          layoutElements.push(element) // 非占位符元素
+        }
+      }
+    }
+  }
+
+  return { placeholderElements, layoutElements }
+}
+
+
 function indexNodes(content) {
   const keys = Object.keys(content)
   const spTreeNode = content[keys[0]]['p:cSld']['p:spTree']
@@ -373,7 +587,10 @@ function indexNodes(content) {
 
         if (id) idTable[id] = targetNodeItem
         if (idx) idxTable[idx] = targetNodeItem
-        if (type) typeTable[type] = targetNodeItem
+        if (type) {
+          const compositeKey = idx ? `${type}_${idx}` : type
+          typeTable[compositeKey] = targetNodeItem
+        }
       }
     } 
     else {
@@ -384,7 +601,10 @@ function indexNodes(content) {
 
       if (id) idTable[id] = targetNode
       if (idx) idxTable[idx] = targetNode
-      if (type) typeTable[type] = targetNode
+      if (type) {
+        const compositeKey = idx ? `${type}_${idx}` : type
+        typeTable[compositeKey] = targetNode
+      }
     }
   }
 
@@ -442,7 +662,8 @@ async function processMathNode(node, warpObj, source) {
   let text = ''
   if (getTextByPathList(choice, ['p:sp', 'p:txBody', 'a:p', 'a:r'])) {
     const sp = getTextByPathList(choice, ['p:sp'])
-    text = genTextBody(sp['p:txBody'], sp, undefined, undefined, warpObj)
+    const textResult = genTextBody(sp['p:txBody'], sp, undefined, undefined, warpObj)
+    text = textResult.content
   }
 
   return {
@@ -524,11 +745,12 @@ async function processSpNode(node, pNode, warpObj, source) {
   let slideLayoutSpNode, slideMasterSpNode
 
   if (type) {
-    if (idx) {
-      slideLayoutSpNode = warpObj['slideLayoutTables']['typeTable'][type]
-      slideMasterSpNode = warpObj['slideMasterTables']['typeTable'][type]
-    } 
-    else {
+    const compositeKey = idx ? `${type}_${idx}` : type
+    slideLayoutSpNode = warpObj['slideLayoutTables']['typeTable'][compositeKey]
+    slideMasterSpNode = warpObj['slideMasterTables']['typeTable'][compositeKey]
+
+    // 向后兼容：如果组合键找不到，尝试单独的 type
+    if (!slideLayoutSpNode && idx) {
       slideLayoutSpNode = warpObj['slideLayoutTables']['typeTable'][type]
       slideMasterSpNode = warpObj['slideMasterTables']['typeTable'][type]
     }
@@ -567,7 +789,7 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   const slideLayoutXfrmNode = getTextByPathList(slideLayoutSpNode, xfrmList)
   const slideMasterXfrmNode = getTextByPathList(slideMasterSpNode, xfrmList)
 
-  const shapType = getTextByPathList(node, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
+  let shapType = getTextByPathList(node, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
   const custShapType = getTextByPathList(node, ['p:spPr', 'a:custGeom'])
 
   const { top, left } = getPosition(slideXfrmNode, slideLayoutXfrmNode, slideMasterXfrmNode)
@@ -587,7 +809,14 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
   else txtRotate = rotate
 
   let content = ''
-  if (node['p:txBody']) content = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj)
+  let hasRealText = false
+  let plainText = '' // 添加纯文本内容
+  if (node['p:txBody']) {
+    const textResult = genTextBody(node['p:txBody'], node, slideLayoutSpNode, type, warpObj)
+    content = textResult.content
+    hasRealText = textResult.hasRealText
+    plainText = extractPlainText(node['p:txBody']) // 提取纯文本
+  }
 
   const { borderColor, borderWidth, borderType, strokeDasharray } = getBorder(node, type, warpObj)
   const fill = await getShapeFill(node, pNode, undefined, warpObj, source) || ''
@@ -598,6 +827,69 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
 
   const vAlign = getVerticalAlign(node, slideLayoutSpNode, slideMasterSpNode, type)
   const isVertical = getTextByPathList(node, ['p:txBody', 'a:bodyPr', 'attrs', 'vert']) === 'eaVert'
+
+  // 获取idx信息和占位符类型
+  const idx = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph', 'attrs', 'idx'])
+  const phNode = getTextByPathList(node, ['p:nvSpPr', 'p:nvPr', 'p:ph'])
+  let phType
+
+  if (phNode) {
+    // 有占位符节点的情况
+    const originalPhType = getTextByPathList(phNode, ['attrs', 'type'])
+    if (!originalPhType || originalPhType === '') {
+      phType = 'any' // 有ph但phType为空时设置为any
+    }
+    else if (originalPhType === 'body') {
+      phType = 'text' // phType为body时设置为text
+    }
+    else {
+      phType = originalPhType // 其他都按原本的来
+    }
+  }
+  else {
+    // 没有占位符节点的情况
+    phType = undefined
+  }
+
+  // 从layout同步shapType和文本内容
+  if (source !== 'layout') {
+    let layoutElement = null
+
+    // 获取对应的版式元素
+    if (phType === 'title' && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['typeTable']) {
+      // title类型：通过类型匹配
+      if (idx) {
+        layoutElement = warpObj['slideLayoutTables']['typeTable'][`title_${idx}`]
+      }
+      if (!layoutElement) {
+        layoutElement = warpObj['slideLayoutTables']['typeTable']['title']
+      }
+    }
+    else if (idx && warpObj['slideLayoutTables'] && warpObj['slideLayoutTables']['idxTable']) {
+      // 其他类型：通过idx匹配
+      layoutElement = warpObj['slideLayoutTables']['idxTable'][idx]
+    }
+
+    if (layoutElement) {
+      // 1. 同步shapType（如果slide没有shapType）
+      if (!shapType) {
+        const layoutShapType = getTextByPathList(layoutElement, ['p:spPr', 'a:prstGeom', 'attrs', 'prst'])
+        if (layoutShapType) {
+          shapType = layoutShapType
+        }
+      }
+
+      // 2. 同步文本内容（如果slide内容为空）
+      if (!hasRealText && layoutElement['p:txBody']) {
+        const layoutTextResult = genTextBody(layoutElement['p:txBody'], layoutElement, layoutElement, type, warpObj)
+        if (layoutTextResult.hasRealText) {
+          content = layoutTextResult.content
+          hasRealText = layoutTextResult.hasRealText
+          plainText = extractPlainText(layoutElement['p:txBody']) // 同步纯文本
+        }
+      }
+    }
+  }
 
   const data = {
     left,
@@ -616,6 +908,9 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
     vAlign,
     name,
     order,
+    idx, // 添加idx信息
+    phType, // 添加占位符类型
+    plainText, // 添加纯文本内容
   }
 
   if (shadow) data.shadow = shadow
@@ -663,18 +958,25 @@ async function genShape(node, pNode, slideLayoutSpNode, slideMasterSpNode, name,
     type: 'text',
     isVertical,
     rotate: txtRotate,
+    hasRealText, // 添加真实文本标记
   }
 }
 
 async function processPicNode(node, warpObj, source) {
   let resObj
   if (source === 'slideMasterBg') resObj = warpObj['masterResObj']
-  else if (source === 'slideLayoutBg') resObj = warpObj['layoutResObj']
+  else if (source === 'slideLayoutBg' || source === 'layout') resObj = warpObj['layoutResObj']
   else resObj = warpObj['slideResObj']
 
   const order = node['attrs']['order']
   
   const rid = node['p:blipFill']['a:blip']['attrs']['r:embed']
+
+  // 添加安全检查
+  if (!resObj || !resObj[rid]) {
+    return null
+  }
+
   const imgName = resObj[rid]['target']
   const imgFileExt = extractFileExtension(imgName).toLowerCase()
   const zip = warpObj['zip']
@@ -783,11 +1085,49 @@ async function processPicNode(node, warpObj, source) {
 
   const { borderColor, borderWidth, borderType, strokeDasharray } = getBorder(node, undefined, warpObj)
 
-  return {
+  // 检查图像透明度
+  let opacity = 1
+
+  // 检查 p:blipFill 下的透明度
+  const blipFillNode = node['p:blipFill']
+  if (blipFillNode && blipFillNode['a:blip']) {
+    // 检查 a:alphaModFix
+    const alphaModFixNode = getTextByPathList(blipFillNode, ['a:blip', 'a:alphaModFix', 'attrs'])
+    if (alphaModFixNode && alphaModFixNode['amt']) {
+      opacity = parseInt(alphaModFixNode['amt']) / 100000
+    }
+
+    // 检查其他透明度路径
+    if (opacity === 1) {
+      const alphaNode = getTextByPathList(blipFillNode, ['a:blip', 'a:alpha', 'attrs'])
+      if (alphaNode && alphaNode['val']) {
+        opacity = parseInt(alphaNode['val']) / 100000
+      }
+    }
+  }
+
+  // 检查 p:spPr 下的透明度（新增的修复路径）
+  if (opacity === 1 && node['p:spPr']) {
+    // 检查 p:spPr -> a:solidFill -> a:srgbClr -> a:alpha
+    const spPrAlpha = parseInt(getTextByPathList(node, ['p:spPr', 'a:solidFill', 'a:srgbClr', 'a:alpha', 'attrs', 'val'])) / 100000
+    if (!isNaN(spPrAlpha)) {
+      opacity = spPrAlpha
+    }
+
+    // 检查 p:spPr -> a:solidFill -> a:schemeClr -> a:alpha
+    if (opacity === 1) {
+      const spPrSchemeAlpha = parseInt(getTextByPathList(node, ['p:spPr', 'a:solidFill', 'a:schemeClr', 'a:alpha', 'attrs', 'val'])) / 100000
+      if (!isNaN(spPrSchemeAlpha)) {
+        opacity = spPrSchemeAlpha
+      }
+    }
+  }
+
+  const result = {
     type: 'image',
     top,
     left,
-    width, 
+    width,
     height,
     rotate,
     src,
@@ -801,6 +1141,13 @@ async function processPicNode(node, warpObj, source) {
     borderType,
     borderStrokeDasharray: strokeDasharray,
   }
+
+  // 如果透明度不是1，添加到结果中
+  if (opacity !== 1) {
+    result.opacity = opacity
+  }
+
+  return result
 }
 
 async function processGraphicFrameNode(node, warpObj, source) {
@@ -957,9 +1304,9 @@ async function genTable(node, warpObj) {
             a_sorce = 'a:nwCell'
           }
         }
-        const text = genTextBody(tcNode['a:txBody'], tcNode, undefined, undefined, warpObj)
+        const textResult = genTextBody(tcNode['a:txBody'], tcNode, undefined, undefined, warpObj)
         const cell = await getTableCellParams(tcNode, thisTblStyle, a_sorce, warpObj)
-        const td = { text }
+        const td = { text: textResult.content }
         if (cell.rowSpan) td.rowSpan = cell.rowSpan
         if (cell.colSpan) td.colSpan = cell.colSpan
         if (cell.vMerge) td.vMerge = cell.vMerge
@@ -989,9 +1336,9 @@ async function genTable(node, warpObj) {
         a_sorce = 'a:lastCol'
       }
 
-      const text = genTextBody(tcNodes['a:txBody'], tcNodes, undefined, undefined, warpObj)
+      const textResult = genTextBody(tcNodes['a:txBody'], tcNodes, undefined, undefined, warpObj)
       const cell = await getTableCellParams(tcNodes, thisTblStyle, a_sorce, warpObj)
-      const td = { text }
+      const td = { text: textResult.content }
       if (cell.rowSpan) td.rowSpan = cell.rowSpan
       if (cell.colSpan) td.colSpan = cell.colSpan
       if (cell.vMerge) td.vMerge = cell.vMerge

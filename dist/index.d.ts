@@ -59,6 +59,8 @@ export interface Shape {
   path?: string
   name: string
   order: number
+  phType?: string
+  plainText?: string
 }
 
 export interface Text {
@@ -81,6 +83,8 @@ export interface Text {
   vAlign: string
   name: string
   order: number
+  phType?: string
+  plainText?: string
 }
 
 export interface Image {
@@ -105,6 +109,7 @@ export interface Image {
   borderWidth: number
   borderType: 'solid' | 'dashed' | 'dotted'
   borderStrokeDasharray: string
+  opacity?: number
 }
 
 export interface TableCell {
@@ -272,6 +277,7 @@ export interface Options {
 
 export const parse: (file: ArrayBuffer, options?: Options) => Promise<{
   slides: Slide[]
+  layouts: Slide[]
   themeColors: string[]
   size: {
     width: number

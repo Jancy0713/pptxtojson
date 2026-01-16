@@ -1,6 +1,55 @@
 import { getHorizontalAlign } from './align'
 import { getTextByPathList } from './utils'
 
+// 提取纯文本内容的函数
+export function extractPlainText(textBodyNode) {
+  if (!textBodyNode) return ''
+
+  let plainText = ''
+  const pNode = textBodyNode['a:p']
+  const pNodes = pNode.constructor === Array ? pNode : [pNode]
+
+  for (const pNode of pNodes) {
+    let rNode = pNode['a:r']
+    let fldNode = pNode['a:fld']
+    let brNode = pNode['a:br']
+
+    if (rNode) {
+      rNode = (rNode.constructor === Array) ? rNode : [rNode]
+
+      if (fldNode) {
+        fldNode = (fldNode.constructor === Array) ? fldNode : [fldNode]
+        rNode = rNode.concat(fldNode)
+      }
+      if (brNode) {
+        brNode = (brNode.constructor === Array) ? brNode : [brNode]
+        brNode.forEach(item => item.type = 'br')
+        if (brNode.length > 1) brNode.shift()
+        rNode = rNode.concat(brNode)
+        rNode.sort((a, b) => {
+          if (!a.attrs || !b.attrs) return true
+          return a.attrs.order - b.attrs.order
+        })
+      }
+    }
+
+    const rNodes = rNode ? rNode : [pNode]
+    for (const rNodeItem of rNodes) {
+      if (rNodeItem.type === 'br') {
+        plainText += '\n'
+      }
+      else {
+        let text = rNodeItem['a:t']
+        if (typeof text !== 'string') text = getTextByPathList(rNodeItem, ['a:fld', 'a:t'])
+        if (typeof text === 'string') plainText += text
+      }
+    }
+    plainText += '\n' // 段落换行
+  }
+
+  return plainText.trim()
+}
+
 import {
   getFontType,
   getFontColor,
@@ -15,9 +64,10 @@ import {
 } from './fontStyle'
 
 export function genTextBody(textBodyNode, spNode, slideLayoutSpNode, type, warpObj) {
-  if (!textBodyNode) return ''
+  if (!textBodyNode) return { content: '', hasRealText: false }
 
   let text = ''
+  let hasRealText = false // 标记是否有真实的文本内容
 
   const pFontStyle = getTextByPathList(spNode, ['p:style', 'a:fontRef'])
 
@@ -73,17 +123,17 @@ export function genTextBody(textBodyNode, spNode, slideLayoutSpNode, type, warpO
       text += `<p style="text-align: ${align};">`
     }
     
-    if (!rNode) text += genSpanElement(pNode, spNode, textBodyNode, pFontStyle, slideLayoutSpNode, type, warpObj)
-    else {
-      for (const rNodeItem of rNode) {
-        text += genSpanElement(rNodeItem, pNode, textBodyNode, pFontStyle, slideLayoutSpNode, type, warpObj)
-      }
+    const rNodes = rNode ? rNode : [pNode]
+    for (const rNodeItem of rNodes) {
+      const spanResult = genSpanElement(rNodeItem, pNode, textBodyNode, pFontStyle, slideLayoutSpNode, type, warpObj)
+      text += spanResult.content
+      if (spanResult.hasRealText) hasRealText = true
     }
 
     if (listType) text += '</li>'
     else text += '</p>'
   }
-  return text
+  return { content: text, hasRealText }
 }
 
 export function getListType(node) {
@@ -107,6 +157,11 @@ export function genSpanElement(node, pNode, textBodyNode, pFontStyle, slideLayou
 
   let text = node['a:t']
   if (typeof text !== 'string') text = getTextByPathList(node, ['a:fld', 'a:t'])
+
+  // 检查是否有真实的文本内容
+  const hasRealText = typeof text === 'string' && text.trim() !== ''
+
+  // 如果没有真实文本，使用&nbsp;作为占位
   if (typeof text !== 'string') text = '&nbsp;'
 
   let styleText = ''
@@ -135,7 +190,13 @@ export function genSpanElement(node, pNode, textBodyNode, pFontStyle, slideLayou
   const linkID = getTextByPathList(node, ['a:rPr', 'a:hlinkClick', 'attrs', 'r:id'])
   if (linkID) {
     const linkURL = warpObj['slideResObj'][linkID]['target']
-    return `<span style="${styleText}"><a href="${linkURL}" target="_blank">${text.replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;').replace(/\s/g, '&nbsp;')}</a></span>`
-  } 
-  return `<span style="${styleText}">${text.replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;').replace(/\s/g, '&nbsp;')}</span>`
+    return {
+      content: `<span style="${styleText}"><a href="${linkURL}" target="_blank">${text.replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;').replace(/\s/g, '&nbsp;')}</a></span>`,
+      hasRealText
+    }
+  }
+  return {
+    content: `<span style="${styleText}">${text.replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;').replace(/\s/g, '&nbsp;')}</span>`,
+    hasRealText
+  }
 }

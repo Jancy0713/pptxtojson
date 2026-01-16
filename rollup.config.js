@@ -43,7 +43,7 @@ export default {
       babelHelpers: 'runtime',
       exclude: ['node_modules/**'],
     }),
-    terser(),
+    // terser(), // 临时禁用压缩以保留日志
     globals(),
     builtins(),
   ]
